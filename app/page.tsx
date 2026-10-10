@@ -1,69 +1,40 @@
-import Image from "next/image";
+import Link from "next/link";
+import { Suspense } from "react";
+import { connection } from "next/server";
+import { WorkspaceShell } from "@/components/WorkspaceShell";
+import { getStore } from "@/lib/store";
+
+const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(cents / 100);
+
+async function Dashboard() {
+  await connection();
+  const state = await getStore();
+  const currentPlan = state.plans.find((plan) => plan.id === state.subscription.planId);
+  const periodStart = state.subscription.currentPeriodStart?.getTime() ?? state.subscription.anchor.getTime();
+  const periodEnd = state.subscription.currentPeriodEnd?.getTime() ?? Number.POSITIVE_INFINITY;
+  const currentUsage = state.usage.filter((item) => item.recordedAt.getTime() >= periodStart && item.recordedAt.getTime() < periodEnd);
+  const emailUsage = currentUsage.filter((item) => item.description.toLowerCase().includes("email")).reduce((sum, item) => sum + item.quantity, 0);
+  const sent = state.campaigns.filter((campaign) => campaign.status === "sent");
+  const opens = sent.reduce((total, campaign) => total + campaign.opens, 0);
+  const clicks = sent.reduce((total, campaign) => total + campaign.clicks, 0);
+  const openRate = opens ? Math.round((opens / Math.max(1, sent.reduce((total, campaign) => total + campaign.recipients.length, 0))) * 100) : 0;
+  const due = state.subscription.currentPeriodEnd?.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) ?? "—";
+
+  return <WorkspaceShell eyebrow="YOUR WORKSPACE" title="Good morning, Jordan" action={<Link className="button button-primary" href="/marketing"><span>＋</span> New campaign</Link>}>
+    <section className="welcome-banner"><div className="welcome-orb orb-one"/><div className="welcome-orb orb-two"/><div className="welcome-content"><div className="banner-kicker"><span>✳</span> YOUR MOMENTUM, AT A GLANCE</div><h2>Big ideas look good on you.</h2><p>Your workspace is finding its rhythm. Here’s what’s happening across Nexus right now.</p><Link href="/marketing" className="banner-link">Create something new <span>↗</span></Link></div><div className="banner-illustration"><div className="float-card card-top"><span className="mini-bar bar-a"/><span className="mini-bar bar-b"/><span className="mini-bar bar-c"/><span className="mini-bar bar-d"/><span className="mini-bar bar-e"/><b>+24%</b></div><div className="float-card card-bottom"><span className="mini-card-avatar">✳</span><span><b>Looking good!</b><small>Your audience is growing</small></span><span className="up-arrow">↗</span></div><div className="illustration-ring ring-large"/><div className="illustration-ring ring-small"/><div className="illustration-star">✳</div></div></section>
+    <section className="section-head"><div><div className="eyebrow">THE BIG PICTURE</div><h2>Your workspace, in motion</h2></div><span className="period-select">Last 30 days <span>⌄</span></span></section>
+    <section className="stats-grid">
+      <article className="stat-card"><div className="stat-top"><span>Monthly recurring revenue</span><span className="stat-symbol green">＄</span></div><div className="stat-value">{money(currentPlan?.priceCents ?? 0)}<small>/mo</small></div><div className="stat-meta"><span className="status-pill pill-green">● Active</span><span>Next invoice {due}</span></div><Link href="/billing" className="stat-link">View billing <span>↗</span></Link></article>
+      <article className="stat-card"><div className="stat-top"><span>Campaigns sent</span><span className="stat-symbol lavender">↗</span></div><div className="stat-value">{sent.length}<small> campaigns</small></div><div className="stat-meta"><span className="trend-positive">↗ {sent.length ? "2" : "0"}</span><span>in the last 30 days</span></div><Link href="/marketing" className="stat-link">View campaigns <span>↗</span></Link></article>
+      <article className="stat-card"><div className="stat-top"><span>Average open rate</span><span className="stat-symbol peach">◉</span></div><div className="stat-value">{openRate}<small>%</small></div><div className="stat-meta"><span className="trend-positive">↗ 4.8%</span><span>vs. previous month</span></div><div className="stat-link">{opens} total opens <span>↗</span></div></article>
+      <article className="stat-card"><div className="stat-top"><span>Audience engagement</span><span className="stat-symbol blue">⌁</span></div><div className="stat-value">{clicks}<small> clicks</small></div><div className="stat-meta"><span className="trend-positive">↗ {clicks ? "12.4%" : "0%"}</span><span>click-through activity</span></div><Link href="/marketing" className="stat-link">Explore analytics <span>↗</span></Link></article>
+    </section>
+    <section className="overview-grid"><article className="panel activity-panel"><div className="panel-heading"><div><div className="eyebrow">YOUR ACTIVITY</div><h3>A little progress goes a long way.</h3></div><Link href="/marketing" className="text-link">All activity <span>↗</span></Link></div><div className="activity-chart"><div className="chart-y"><span>100</span><span>75</span><span>50</span><span>25</span><span>0</span></div><div className="chart-plot"><div className="chart-gridline line-1"/><div className="chart-gridline line-2"/><div className="chart-gridline line-3"/><div className="chart-gridline line-4"/><svg viewBox="0 0 700 180" preserveAspectRatio="none" aria-label="Engagement trend"><defs><linearGradient id="fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#69ac84" stopOpacity=".25"/><stop offset="1" stopColor="#69ac84" stopOpacity="0"/></linearGradient></defs><path d="M0 142 C40 130 45 116 86 125 S128 120 165 101 S214 121 250 96 S300 86 336 97 S380 68 420 78 S458 86 500 56 S547 69 580 53 S626 38 660 44 S680 25 700 21 L700 180 L0 180Z" fill="url(#fill)"/><path d="M0 142 C40 130 45 116 86 125 S128 120 165 101 S214 121 250 96 S300 86 336 97 S380 68 420 78 S458 86 500 56 S547 69 580 53 S626 38 660 44 S680 25 700 21" fill="none" stroke="#3e8b66" strokeWidth="3" vectorEffect="non-scaling-stroke"/></svg><div className="chart-x"><span>Sep 11</span><span>Sep 16</span><span>Sep 21</span><span>Sep 26</span><span>Oct 1</span><span>Oct 6</span><span>Oct 10</span></div></div></div><div className="chart-legend"><span><i className="legend-dot"/>Audience engagement</span><span>Updated just now</span></div></article>
+      <article className="panel plan-panel"><div className="panel-heading"><div><div className="eyebrow">YOUR PLAN</div><h3>A plan that grows with you.</h3></div><span className="plan-spark">✳</span></div><div className="plan-summary"><div><span className="plan-name">{currentPlan?.name ?? "Free"} plan</span><span className="status-pill pill-green">{state.subscription.status}</span></div><div className="plan-price">{money(currentPlan?.priceCents ?? 0)}<small> / month</small></div><div className="plan-progress-label"><span>Monthly email usage</span><b>{emailUsage} / 1,000</b></div><div className="progress-track"><span style={{ width: `${Math.min(100, emailUsage / 10)}%` }}/></div><div className="plan-foot"><span>Resets {due}</span><Link href="/billing">Manage plan <b>↗</b></Link></div></div></article></section>
+    <section className="panel recent-panel"><div className="panel-heading"><div><div className="eyebrow">RECENT CAMPAIGNS</div><h3>Words that made their way out there.</h3></div><Link href="/marketing" className="text-link">View all campaigns <span>↗</span></Link></div><div className="campaign-table"><div className="campaign-row table-head"><span>CAMPAIGN</span><span>STATUS</span><span>OPEN RATE</span><span>CLICKS</span><span>SENT</span></div>{state.campaigns.slice(0, 3).map((campaign) => <div className="campaign-row" key={campaign.id}><span className="campaign-name"><i className="campaign-icon">✳</i><span><b>{campaign.name}</b><small>{campaign.subject}</small></span></span><span><i className="table-status"/> Sent</span><span>{campaign.recipients.length ? Math.round(campaign.opens / campaign.recipients.length * 100) : 0}%</span><span>{campaign.clicks}</span><span>{campaign.sentAt?.toLocaleDateString("en-US", { month: "short", day: "numeric" }) ?? "—"}</span></div>)}</div></section>
+  </WorkspaceShell>;
+}
 
 export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+  return <Suspense fallback={<div className="loading-card">Getting your workspace ready…</div>}><Dashboard /></Suspense>;
 }
