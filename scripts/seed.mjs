@@ -1,37 +1,37 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
-import initSqlJs from "sql.js";
+import { readFile } from "node:fs/promises";
+import { PrismaClient } from "@prisma/client";
+import { buildSeedState } from "../lib/seed-data.mjs";
 
-const root = process.cwd();
-try {
-  const envFile = await readFile(path.join(root, ".env.local"), "utf8");
-  for (const line of envFile.split(/\r?\n/)) {
-    const match = line.match(/^\s*DATABASE_PATH\s*=\s*(.*?)\s*$/);
-    if (match && !process.env.DATABASE_PATH) process.env.DATABASE_PATH = match[1].replace(/^['"]|['"]$/g, "");
-  }
-} catch { /* .env.local is optional */ }
-
-const configured = process.env.DATABASE_PATH || ".data/nexus.sqlite";
-const databasePath = path.isAbsolute(configured) ? configured : path.resolve(root, configured);
-await mkdir(path.dirname(databasePath), { recursive: true });
-let fileBytes;
-try { fileBytes = await readFile(databasePath); } catch (error) {
-  if (error.code !== "ENOENT") throw error;
-}
-const SQL = await initSqlJs({ locateFile: (file) => path.join(root, "node_modules", "sql.js", "dist", file) });
-const database = new SQL.Database(fileBytes ? new Uint8Array(fileBytes) : undefined);
-database.run("PRAGMA foreign_keys = ON;");
-database.run(await readFile(path.join(root, "db", "schema.sql"), "utf8"));
-const seeded = Number(database.exec("SELECT COUNT(*) FROM plans")[0]?.values[0]?.[0] ?? 0) > 0;
-if (!seeded) {
-  database.run("BEGIN");
+// Node does not load Next.js .env.local automatically. Read only the database
+// URL into the environment; never print it.
+if (!process.env.DATABASE_URL) {
   try {
-    database.run(await readFile(path.join(root, "db", "seed.sql"), "utf8"));
-    database.run("COMMIT");
-  } catch (error) { database.run("ROLLBACK"); throw error; }
+    const env = await readFile(new URL("../.env.local", import.meta.url), "utf8");
+    const line = env.split(/\r?\n/).find((item) => /^\s*DATABASE_URL\s*=/.test(item));
+    if (line) process.env.DATABASE_URL = line.replace(/^\s*DATABASE_URL\s*=\s*/, "").replace(/^['"]|['"]$/g, "").trim();
+  } catch { /* use DATABASE_URL supplied by the shell */ }
 }
-const temporaryPath = `${databasePath}.${process.pid}.tmp`;
-await writeFile(temporaryPath, Buffer.from(database.export()));
-await rename(temporaryPath, databasePath);
-database.close();
-console.log(seeded ? `Database already seeded: ${databasePath}` : `Database schema and demo data created: ${databasePath}`);
+if (!process.env.DATABASE_URL) throw new Error("Set DATABASE_URL in .env.local or the shell environment.");
+
+const db = new PrismaClient();
+try {
+  const state = buildSeedState();
+  const existing = await db.p4Store.findUnique({ where: { id: "nexovate-p4-demo" } });
+  if (existing) {
+    await db.p4InvoiceIdempotency.createMany({
+      data: existing.state.invoices.map((invoice) => ({ idempotencyKey: invoice.idempotencyKey, invoiceId: invoice.id })),
+      skipDuplicates: true,
+    });
+    console.log("P4 demo data already exists; it was left unchanged.");
+  } else {
+    await db.$transaction(async (tx) => {
+      await tx.p4Store.create({ data: { id: "nexovate-p4-demo", state } });
+      await tx.p4InvoiceIdempotency.createMany({
+        data: state.invoices.map((invoice) => ({ idempotencyKey: invoice.idempotencyKey, invoiceId: invoice.id })),
+      });
+    });
+    console.log("P4 demo data seeded into PostgreSQL.");
+  }
+} finally {
+  await db.$disconnect();
+}

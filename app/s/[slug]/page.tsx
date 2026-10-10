@@ -1,5 +1,7 @@
 import { notFound } from 'next/navigation';
 
+export const instant = false;
+
 interface PublicSitePageProps {
   params: Promise<{
     slug: string;
