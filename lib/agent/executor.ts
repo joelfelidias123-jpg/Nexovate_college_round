@@ -1,17 +1,10 @@
-// ============================================================================
-// FILE: lib/agent/executor.ts — Runs the Plan Step-by-Step
-// ============================================================================
-
-import { getSteps, updateStepStatus, updateRunStatus } from "./db";
+﻿import { getSteps, updateStepStatus, updateRunStatus } from "./db";
 import { logAudit } from "./audit";
 import { TOOL_CLIENTS } from "./toolClients";
 import { scrubSensitivePayload } from "./security";
 
-/**
- * Resolves placeholders like "{{webinarId}}", "{{campaignId}}", or "{{siteId}}"
- * in a step's input using outputs collected from earlier steps in the same run.
- * This ensures sequential handoffs between P2 and P4 work seamlessly.
- */
+const GATED_TOOLS = new Set<string>(["scheduleCampaign", "notifyCRM", "recordUsage"]);
+
 function resolveStepPlaceholders(
   input: Record<string, unknown>,
   contextOutputs: Record<string, unknown>
@@ -28,72 +21,86 @@ function resolveStepPlaceholders(
   return resolved;
 }
 
-/**
- * Executes every step of an approved run, IN ORDER.
- *
- * Critical design choice: one step failing does NOT crash the whole
- * run or throw an unhandled exception up to the UI. Each step's
- * success/failure is tracked independently so the timeline can show
- * partial progress — this is what separates "robust system" from
- * "fragile prototype" in a live demo.
- */
-export async function executeRun(runId: string): Promise<void> {
-  await updateRunStatus(runId, "EXECUTING");
-  await logAudit(runId, "agent", "RUN_EXECUTION_STARTED");
-
+export async function executeUntilApprovalGate(runId: string): Promise<void> {
   const steps = await getSteps(runId);
-
-  // Accumulate outputs across steps so "{{webinarId}}", "{{campaignId}}", etc.
-  // resolve to real IDs returned by earlier steps.
   const accumulatedOutputs: Record<string, unknown> = {
     existingSaasSiteId: "saas-site-default-1",
     latestWebinarId: "webinar-latest-1",
   };
 
   for (const step of steps) {
-    const resolvedInput = resolveStepPlaceholders(
-      step.input,
-      accumulatedOutputs
-    );
+    if (GATED_TOOLS.has(step.tool_name) || steps.length === 1) {
+      await updateRunStatus(runId, "AWAITING_APPROVAL");
+      await logAudit(runId, "agent", `APPROVAL_GATE_PAUSED:${step.tool_name}`, {
+        pendingTool: step.tool_name,
+      });
+      return;
+    }
+
+    const resolvedInput = resolveStepPlaceholders(step.input, accumulatedOutputs);
     const safeInput = scrubSensitivePayload(resolvedInput);
 
     await updateStepStatus(step.id, runId, "RUNNING");
-    await logAudit(
-      runId,
-      "agent",
-      `TOOL_CALL_STARTED:${step.tool_name}`,
-      safeInput
-    );
+    await logAudit(runId, "agent", `TOOL_CALL_STARTED:${step.tool_name}`, safeInput);
 
     try {
       const toolFn = TOOL_CLIENTS[step.tool_name];
-      if (!toolFn) {
-        throw new Error(`No client registered for tool: ${step.tool_name}`);
-      }
+      if (!toolFn) throw new Error(`No client registered for tool: ${step.tool_name}`);
 
       const result = (await toolFn(resolvedInput)) as Record<string, unknown>;
       Object.assign(accumulatedOutputs, result);
 
       const safeResult = scrubSensitivePayload(result);
-
       await updateStepStatus(step.id, runId, "SUCCESS", safeResult);
-      await logAudit(
-        runId,
-        "agent",
-        `TOOL_CALL_SUCCESS:${step.tool_name}`,
-        safeResult
-      );
+      await logAudit(runId, "agent", `TOOL_CALL_SUCCESS:${step.tool_name}`, safeResult);
     } catch (err) {
       const errorMsg = (err as Error).message;
-
       await updateStepStatus(step.id, runId, "FAILED", { error: errorMsg });
-      await logAudit(runId, "agent", `TOOL_CALL_FAILED:${step.tool_name}`, {
-        error: errorMsg,
-      });
+      await logAudit(runId, "agent", `TOOL_CALL_FAILED:${step.tool_name}`, { error: errorMsg });
+      await updateRunStatus(runId, "FAILED");
+      return;
+    }
+  }
 
-      // Design decision: we STOP the run on first failure rather than
-      // continuing blindly (later steps may depend on this one's output,
-      // e.g. webinarId feeding into draftCampaign).
+  await updateRunStatus(runId, "AWAITING_APPROVAL");
+}
+
+export async function executeRun(runId: string): Promise<void> {
+  await updateRunStatus(runId, "EXECUTING");
+  await logAudit(runId, "agent", "RUN_EXECUTION_STARTED");
+
+  const steps = await getSteps(runId);
+  const accumulatedOutputs: Record<string, unknown> = {
+    existingSaasSiteId: "saas-site-default-1",
+    latestWebinarId: "webinar-latest-1",
+  };
+  for (const s of steps) {
+    if (s.status === "SUCCESS" && s.output) Object.assign(accumulatedOutputs, s.output);
+  }
+
+  for (const step of steps) {
+    if (step.status === "SUCCESS") continue;
+
+    const resolvedInput = resolveStepPlaceholders(step.input, accumulatedOutputs);
+    const safeInput = scrubSensitivePayload(resolvedInput);
+
+    await updateStepStatus(step.id, runId, "RUNNING");
+    await logAudit(runId, "agent", `TOOL_CALL_STARTED:${step.tool_name}`, safeInput);
+
+    try {
+      const toolFn = TOOL_CLIENTS[step.tool_name];
+      if (!toolFn) throw new Error(`No client registered for tool: ${step.tool_name}`);
+
+      const result = (await toolFn(resolvedInput)) as Record<string, unknown>;
+      Object.assign(accumulatedOutputs, result);
+
+      const safeResult = scrubSensitivePayload(result);
+      await updateStepStatus(step.id, runId, "SUCCESS", safeResult);
+      await logAudit(runId, "agent", `TOOL_CALL_SUCCESS:${step.tool_name}`, safeResult);
+    } catch (err) {
+      const errorMsg = (err as Error).message;
+      await updateStepStatus(step.id, runId, "FAILED", { error: errorMsg });
+      await logAudit(runId, "agent", `TOOL_CALL_FAILED:${step.tool_name}`, { error: errorMsg });
       await updateRunStatus(runId, "FAILED");
       return;
     }
