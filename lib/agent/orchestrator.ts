@@ -1,121 +1,107 @@
 // ============================================================================
-// FILE: lib/agent/db.ts — DB Access Layer (swap in real client from P1)
+// FILE: lib/agent/orchestrator.ts — Ties Everything Together
 // ============================================================================
-// This file isolates all database calls behind simple functions.
-// Replace the internals with actual Supabase/Postgres calls once
-// P1 shares the real client — nothing else in your code needs to change.
 
-import crypto from "node:crypto";
-import { Plan, PlanStep } from "./schemas";
+import { planWithLLM } from "./llmPlanner";
+import { createRun, getRun, updateRunStatus } from "./db";
+import { executeRun } from "./executor";
+import {
+  assertCanApprove,
+  assertNotReplayedApproval,
+  assertSafeAndPrivatePrompt,
+  assertWithinRateLimit,
+  User,
+} from "./security";
+import { logAudit } from "./audit";
 
-export type RunStatus =
-  | "PLANNED"
-  | "AWAITING_APPROVAL"
-  | "APPROVED"
-  | "REJECTED"
-  | "EXECUTING"
-  | "COMPLETED"
-  | "FAILED";
+/**
+ * STEP 1: User submits a prompt.
+ * First enforces rate-limiting and prompt-injection/PII scrubbing via
+ * security.ts. Then generates a plan (LLM or fallback), stores it, and
+ * puts the run into AWAITING_APPROVAL state. Nothing executes yet.
+ */
+export async function submitPrompt(prompt: string, user: User) {
+  let safePrompt: string;
+  try {
+    assertWithinRateLimit(user.id);
+    safePrompt = assertSafeAndPrivatePrompt(prompt);
+  } catch (err) {
+    await logAudit(null, user.id, "PROMPT_BLOCKED_SECURITY", {
+      error: (err as Error).message,
+    });
+    throw err;
+  }
 
-export type StepStatus = "PENDING" | "RUNNING" | "SUCCESS" | "FAILED";
+  const { plan, source } = await planWithLLM(safePrompt);
 
-export interface AgentRun {
-  id: string;
-  prompt: string;
-  plan: Plan;
-  status: RunStatus;
-  created_by: string;
-  created_at: string;
-}
+  const run = await createRun(safePrompt, plan, user.id);
 
-export interface AgentStep {
-  id: string;
-  run_id: string;
-  tool_name: string;
-  input: Record<string, unknown>;
-  output: Record<string, unknown> | null;
-  status: StepStatus;
-  started_at: string | null;
-  completed_at: string | null;
-}
-
-// --- TEMPORARY in-memory store so you can build/test before P1's DB
-// --- is wired up. Stored on globalThis so Next.js dev hot-reloads
-// --- don't wipe active runs between API route invocations.
-
-const globalDb = globalThis as unknown as {
-  __nexusRuns?: Map<string, AgentRun>;
-  __nexusSteps?: Map<string, AgentStep[]>;
-};
-
-const runs = globalDb.__nexusRuns ?? (globalDb.__nexusRuns = new Map<string, AgentRun>());
-const steps = globalDb.__nexusSteps ?? (globalDb.__nexusSteps = new Map<string, AgentStep[]>());
-
-export async function createRun(
-  prompt: string,
-  plan: Plan,
-  userId: string
-): Promise<AgentRun> {
-  const run: AgentRun = {
-    id: crypto.randomUUID(),
-    prompt,
-    plan,
-    status: "AWAITING_APPROVAL",
-    created_by: userId,
-    created_at: new Date().toISOString(),
-  };
-  runs.set(run.id, run);
-
-  // Create one step record per plan step, all starting as PENDING
-  const runSteps: AgentStep[] = plan.map((step: PlanStep) => ({
-    id: crypto.randomUUID(),
-    run_id: run.id,
-    tool_name: step.tool,
-    input: step.params,
-    output: null,
-    status: "PENDING",
-    started_at: null,
-    completed_at: null,
-  }));
-  steps.set(run.id, runSteps);
+  await logAudit(run.id, user.id, "PLAN_CREATED", {
+    prompt: safePrompt,
+    source,
+  });
 
   return run;
 }
 
-export async function getRun(runId: string): Promise<AgentRun | undefined> {
-  return runs.get(runId);
-}
-
-export async function getAllRuns(): Promise<AgentRun[]> {
-  return Array.from(runs.values()).reverse();
-}
-
-export async function getSteps(runId: string): Promise<AgentStep[]> {
-  return steps.get(runId) ?? [];
-}
-
-export async function updateRunStatus(
-  runId: string,
-  status: RunStatus
-): Promise<void> {
-  const run = runs.get(runId);
-  if (run) run.status = status;
-}
-
-export async function updateStepStatus(
-  stepId: string,
-  runId: string,
-  status: StepStatus,
-  output: Record<string, unknown> | null = null
-): Promise<void> {
-  const runSteps = steps.get(runId) ?? [];
-  const step = runSteps.find((s) => s.id === stepId);
-  if (!step) return;
-
-  step.status = status;
-  step.output = output;
-  if (status === "RUNNING") step.started_at = new Date().toISOString();
-  if (status === "SUCCESS" || status === "FAILED") {
-    step.completed_at = new Date().toISOString();
+/**
+ * STEP 2: Admin approves the run.
+ * Role check and replay check happen FIRST — if either throws, we log
+ * the blocked attempt and never touch the executor.
+ */
+export async function approveRun(runId: string, user: User) {
+  try {
+    assertCanApprove(user);
+  } catch (err) {
+    await logAudit(runId, user.id, "APPROVE_DENIED_UNAUTHORIZED", {
+      role: user?.role,
+    });
+    throw err;
   }
+
+  const run = await getRun(runId);
+  if (!run) throw new Error("Run not found");
+  if (run.status !== "AWAITING_APPROVAL") {
+    throw new Error(`Cannot approve a run in status ${run.status}`);
+  }
+
+  try {
+    assertNotReplayedApproval(runId);
+  } catch (err) {
+    await logAudit(runId, user.id, "APPROVE_DENIED_REPLAY", {
+      error: (err as Error).message,
+    });
+    throw err;
+  }
+
+  await updateRunStatus(runId, "APPROVED");
+  await logAudit(runId, user.id, "RUN_APPROVED");
+
+  // Fire execution — for our 24hr hackathon demo, direct async execution
+  // ensures all steps complete deterministically before returning.
+  await executeRun(runId);
+}
+
+/**
+ * STEP 3 (alt): Admin rejects the run instead.
+ * No execution happens, but we still log it for the audit trail.
+ */
+export async function rejectRun(runId: string, user: User) {
+  try {
+    assertCanApprove(user); // same permission required to reject
+  } catch (err) {
+    await logAudit(runId, user.id, "REJECT_DENIED_UNAUTHORIZED", {
+      role: user?.role,
+    });
+    throw err;
+  }
+
+  const run = await getRun(runId);
+  if (!run) throw new Error("Run not found");
+  if (run.status !== "AWAITING_APPROVAL") {
+    throw new Error(`Cannot reject a run in status ${run.status}`);
+  }
+
+  await updateRunStatus(runId, "REJECTED");
+  await logAudit(runId, user.id, "RUN_REJECTED");
 }

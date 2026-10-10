@@ -1,5 +1,7 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
+import type { AgentRun, AgentStep } from "@/lib/agent/db";
+import type { AuditEntry } from "@/lib/agent/audit";
 
 const REHEARSED_PROMPTS = [
   { label: "Hero Flow: Webinar Next Friday", prompt: "Next Friday ke liye webinar launch karo" },
@@ -11,28 +13,40 @@ export default function AgentPage() {
   const [activeTab, setActiveTab] = useState<"workflow" | "audit">("workflow");
   const [user, setUser] = useState<{ id: string; role: "admin" | "member" }>({ id: "user-admin-1", role: "admin" });
   const [prompt, setPrompt] = useState("Next Friday ke liye webinar launch karo");
-  const [currentRun, setCurrentRun] = useState<any>(null);
-  const [steps, setSteps] = useState<any[]>([]);
-  const [runHistory, setRunHistory] = useState<any[]>([]);
-  const [auditLog, setAuditLog] = useState<any[]>([]);
+  const [currentRun, setCurrentRun] = useState<AgentRun | null>(null);
+  const [steps, setSteps] = useState<AgentStep[]>([]);
+  const [runHistory, setRunHistory] = useState<AgentRun[]>([]);
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const fetchRunDetails = useCallback(async (runId: string) => {
     const res = await fetch(`/api/agent/run/${runId}`);
     if (!res.ok) return;
-    const data = await res.json();
+    const data = await res.json() as { run: AgentRun; steps?: AgentStep[] };
     setCurrentRun(data.run);
     setSteps(data.steps ?? []);
   }, []);
 
   const fetchHistoryAndAudit = useCallback(async () => {
     const [runsRes, auditRes] = await Promise.all([fetch("/api/agent/prompt"), fetch("/api/agent/audit")]);
-    if (runsRes.ok) setRunHistory((await runsRes.json()).runs ?? []);
-    if (auditRes.ok) setAuditLog((await auditRes.json()).log ?? []);
+    if (runsRes.ok) setRunHistory(((await runsRes.json()) as { runs?: AgentRun[] }).runs ?? []);
+    if (auditRes.ok) setAuditLog(((await auditRes.json()) as { log?: AuditEntry[] }).log ?? []);
   }, []);
 
-  useEffect(() => { fetchHistoryAndAudit(); }, [fetchHistoryAndAudit]);
+  useEffect(() => {
+    let active = true;
+    Promise.all([fetch("/api/agent/prompt"), fetch("/api/agent/audit")]).then(async ([runsRes, auditRes]) => {
+      const [runs, audit] = await Promise.all([
+        runsRes.ok ? runsRes.json() as Promise<{ runs?: AgentRun[] }> : Promise.resolve({} as { runs?: AgentRun[] }),
+        auditRes.ok ? auditRes.json() as Promise<{ log?: AuditEntry[] }> : Promise.resolve({} as { log?: AuditEntry[] }),
+      ]);
+      if (!active) return;
+      setRunHistory(runs.runs ?? []);
+      setAuditLog(audit.log ?? []);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   async function handleSubmitPrompt(e?: React.FormEvent, overridePrompt?: string) {
     if (e) e.preventDefault();
@@ -46,11 +60,11 @@ export default function AgentPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: targetPrompt, user }),
       });
-      const data = await res.json();
+      const data = await res.json() as { error?: string; run?: AgentRun; steps?: AgentStep[] };
       if (!res.ok) setErrorMsg(data.error || "Failed to create plan");
-      else { setCurrentRun(data.run); setSteps(data.steps ?? []); setActiveTab("workflow"); }
+      else if (data.run) { setCurrentRun(data.run); setSteps(data.steps ?? []); setActiveTab("workflow"); }
       await fetchHistoryAndAudit();
-    } catch (err: any) { setErrorMsg(err.message); }
+    } catch (err) { setErrorMsg(err instanceof Error ? err.message : String(err)); }
     finally { setLoading(false); }
   }
 
@@ -64,11 +78,11 @@ export default function AgentPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ runId: currentRun.id, user }),
       });
-      const data = await res.json();
+      const data = await res.json() as { error?: string };
       if (!res.ok) setErrorMsg(data.error || "Action failed");
       else await fetchRunDetails(currentRun.id);
       await fetchHistoryAndAudit();
-    } catch (err: any) { setErrorMsg(err.message); }
+    } catch (err) { setErrorMsg(err instanceof Error ? err.message : String(err)); }
     finally { setLoading(false); }
   }
 
@@ -78,7 +92,7 @@ export default function AgentPage() {
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div>
             <h1 className="text-xl font-bold text-white">Nexus AI Agent</h1>
-            <p className="text-xs text-slate-400">Planner • Approval Gate • Role Check • Audit Log</p>
+            <p className="text-xs text-slate-400">Planner ï¿½ Approval Gate ï¿½ Role Check ï¿½ Audit Log</p>
           </div>
           <div className="flex bg-slate-900 border border-slate-800 rounded-lg p-1 text-xs">
             <button onClick={() => setUser({ id: "user-admin-1", role: "admin" })} className={`px-3 py-1.5 rounded ${user.role === "admin" ? "bg-indigo-600 text-white" : "text-slate-400"}`}>Admin</button>

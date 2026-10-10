@@ -1,134 +1,65 @@
-// ============================================================================
-// FILE: lib/agent/llmPlanner.ts — Provider-Agnostic LLM Call
-// ============================================================================
+import { validatePlan } from "./schemas";
 
-import { validatePlan, Plan } from "./schemas";
-import { getFallbackPlan } from "./fallbackPlans";
-import { TOOL_REGISTRY } from "./tools";
+export type User = { id: string; role: string };
 
-// IMPORTANT: this file is the ONLY place that talks to an LLM provider.
-// Swapping providers later means editing ONE function, not hunting
-// through the whole codebase. Keep it that way.
-
-const SYSTEM_PROMPT = `
-You are a planner for a business automation agent.
-Given a user instruction, output ONLY a JSON array of steps using
-tools from this registry: ${JSON.stringify(TOOL_REGISTRY)}.
-Each item must have shape: { "tool": "<toolName>", "params": { ... } }.
-Do not invent tools. Do not include any explanation text, only JSON.
-`;
-
-/**
- * Calls whichever LLM provider is configured via env var.
- * Supports generic LLM_API_URL + LLM_API_KEY, or defaults to Google Gemini
- * free-tier endpoint when GEMINI_API_KEY is provided.
- * The rest of the system doesn't care which provider this is.
- */
-async function callLLMProvider(prompt: string): Promise<unknown> {
-  const apiKey = process.env.LLM_API_KEY || process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("No LLM_API_KEY or GEMINI_API_KEY configured");
+export class UnauthorizedError extends Error {
+  readonly status = 403;
+  constructor(message = "Administrator role required") {
+    super(message);
+    this.name = "UnauthorizedError";
   }
-
-  // Case A: Custom provider URL configured (OpenAI-compatible / custom proxy)
-  if (process.env.LLM_API_URL) {
-    const response = await fetch(process.env.LLM_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        system: SYSTEM_PROMPT,
-        user: prompt,
-        responseFormat: "json",
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`LLM provider returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    return JSON.parse(data.text ?? data.content ?? "[]");
-  }
-
-  // Case B: Default Gemini Free-Tier REST call (P3 stack: Gemini API free tier)
-  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  const response = await fetch(geminiUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`LLM provider returned ${response.status}`);
-  }
-
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "[]";
-  return JSON.parse(text);
 }
 
-/**
- * Wraps the raw LLM call with a timeout. We never want to leave a user
- * (or a judge) staring at a loading spinner for 15+ seconds. If the
- * model is slow, we bail out fast and fall back to the cached plan.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error("LLM call timed out")), ms)
-    ),
-  ]);
+const requestTimes = new Map<string, number[]>();
+const approvedRuns = new Set<string>();
+const WINDOW_MS = 60_000;
+const MAX_REQUESTS = 15;
+
+export function assertCanApprove(user: User): void {
+  if (!user || user.role.toLowerCase() !== "admin") throw new UnauthorizedError();
 }
 
-/**
- * THE MAIN ENTRY POINT. This is what the rest of the app calls.
- *
- * Flow:
- * 1. Try live LLM call (max 3s)
- * 2. Validate the response structurally (Zod) and per-step (params)
- * 3. If ANYTHING goes wrong at any point — timeout, bad JSON, invalid
- *    plan — silently fall back to the pre-written plan for that exact
- *    rehearsed prompt.
- * 4. If there's no fallback for this prompt either, surface a real
- *    error (this should only happen for free-text prompts outside
- *    the 3 rehearsed ones, which aren't part of the demo path).
- */
-export async function planWithLLM(prompt: string): Promise<{
-  plan: Plan;
-  source: "llm" | "fallback";
-}> {
-  try {
-    const rawPlan = await withTimeout(callLLMProvider(prompt), 3000);
-    const result = validatePlan(rawPlan);
+export function assertWithinRateLimit(userId: string): void {
+  const now = Date.now();
+  const recent = (requestTimes.get(userId) ?? []).filter((time) => now - time < WINDOW_MS);
+  if (recent.length >= MAX_REQUESTS) throw new Error("Rate limit exceeded. Please wait a minute before trying again.");
+  recent.push(now);
+  requestTimes.set(userId, recent);
+}
 
-    if (result.valid && result.plan) {
-      return { plan: result.plan, source: "llm" };
-    }
+function scrubText(value: string): string {
+  return value
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+    .replace(/\b(?:sk|pk|AIza)[-_][A-Za-z0-9_-]{12,}\b/g, "[redacted-secret]")
+    .replace(/\b(?:\d[ -]*?){13,19}\b/g, "[redacted-number]");
+}
 
-    console.warn("LLM plan failed validation, using fallback:", result.error);
-  } catch (err) {
-    console.warn("LLM call failed, using fallback:", (err as Error).message);
+export function assertSafeAndPrivatePrompt(prompt: string): string {
+  if (typeof prompt !== "string" || !prompt.trim()) throw new Error("Prompt is required");
+  if (prompt.length > 2_000) throw new Error("Prompt is too long (maximum 2,000 characters)");
+  const blocked = [
+    /ignore\s+(all\s+)?(previous|prior|above)\s+instructions/i,
+    /reveal\s+(the\s+)?(system|hidden)\s+prompt/i,
+    /<\s*script\b|javascript\s*:/i,
+  ];
+  if (blocked.some((pattern) => pattern.test(prompt))) throw new Error("Prompt blocked by the security policy");
+  return scrubText(prompt.trim());
+}
+
+export function assertNotReplayedApproval(runId: string): void {
+  if (approvedRuns.has(runId)) throw new Error("This run has already received an approval attempt");
+  approvedRuns.add(runId);
+}
+
+export function scrubSensitivePayload<T>(payload: T): T {
+  if (typeof payload === "string") return scrubText(payload) as T;
+  if (Array.isArray(payload)) return payload.map((item) => scrubSensitivePayload(item)) as T;
+  if (payload && typeof payload === "object") {
+    return Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, scrubSensitivePayload(value)])) as T;
   }
+  return payload;
+}
 
-  // Safety net kicks in here
-  const fallback = getFallbackPlan(prompt);
-  if (fallback) {
-    return { plan: fallback, source: "fallback" };
-  }
-
-  // No LLM plan, no fallback — this prompt is genuinely unsupported.
-  throw new Error("Could not generate a valid plan for this prompt.");
+export function validateAgentPlan(plan: unknown) {
+  return validatePlan(plan);
 }

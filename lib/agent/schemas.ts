@@ -1,57 +1,70 @@
-# Nexus P3 (AI Agent + Security) — Module README
+// ============================================================================
+// FILE: lib/agent/schemas.ts — Zod Validation (the safety net)
+// ============================================================================
 
-This directory (`lib/agent/`) implements Person 3's **AI Workflow Planner, Two-Layer Zod Validator, Hardcoded Demo Fallback, Security & Privacy Gate, Mockable Tool Clients, Sequential Executor, and Audit Logger** per the Nexus Hackathon Context Handoff Document.
+import { z } from "zod";
+import { TOOL_REGISTRY } from "./tools";
 
----
+// Build a runtime-checkable enum of tool names from the registry keys.
+// If someone adds a tool to TOOL_REGISTRY but forgets to update this,
+// TypeScript will complain — keeps the two in sync automatically.
+const toolNames = Object.keys(TOOL_REGISTRY) as [string, ...string[]];
 
-## 1. File Structure
+// Schema for ONE step in a plan. `params` is loosely typed here
+// (z.record(z.string(), z.any())) because each tool has different params —
+// we do a second, stricter check per-tool in validateStepParams() below.
+export const PlanStepSchema = z.object({
+  tool: z.enum(toolNames),
+  params: z.record(z.string(), z.any()),
+});
 
-```text
-lib/agent/
-  ├── tools.ts          # Frozen TOOL_REGISTRY whitelist (contract with P1/P2/P4)
-  ├── schemas.ts        # Two-layer validation: Zod structure + per-tool required params
-  ├── fallbackPlans.ts  # Pre-computed plans for the 3 rehearsed demo prompts
-  ├── llmPlanner.ts     # Single provider-agnostic LLM adapter (3s timeout -> fallback)
-  ├── db.ts             # Isolated data-access layer (swap in P1's Supabase client)
-  ├── audit.ts          # Audit logger for all plans, tool calls, approvals & denials
-  ├── security.ts       # Role gate (assertCanApprove) + Prompt/PII/Rate-Limit/Replay guards
-  ├── toolClients.ts    # Mockable P2/P4 HTTP bridge (controlled via USE_MOCKS)
-  ├── executor.ts       # Sequential step runner with placeholder resolution & error isolation
-  └── orchestrator.ts   # Ties submitPrompt, approveRun, and rejectRun together
+// A full plan is just an array of valid steps (must have at least 1 step).
+export const PlanSchema = z.array(PlanStepSchema).min(1);
 
-app/api/agent/
-  ├── prompt/route.ts   # POST /api/agent/prompt (and GET /api/agent/prompt for run history)
-  ├── approve/route.ts  # POST /api/agent/approve
-  ├── reject/route.ts   # POST /api/agent/reject
-  ├── run/[id]/route.ts # GET  /api/agent/run/:id
-  └── audit/route.ts    # GET  /api/agent/audit
+export type PlanStep = z.infer<typeof PlanStepSchema>;
+export type Plan = z.infer<typeof PlanSchema>;
 
-app/agent/
-  └── page.tsx          # Agent Screen React UI (Prompt box, Timeline, Approval Gate, Audit Tab)
-```
+/**
+ * Second-layer check: does this specific tool call have all the
+ * params it needs? This catches cases where the LLM picks a valid
+ * tool name but forgets/mangles a required field.
+ *
+ * Returns true/false instead of throwing — caller decides what to do
+ * (e.g. fall back to cached plan) so the agent never hard-crashes
+ * on bad LLM output.
+ */
+export function validateStepParams(step: PlanStep): boolean {
+  const toolDef = TOOL_REGISTRY[step.tool as keyof typeof TOOL_REGISTRY];
+  if (!toolDef) return false;
 
----
+  return toolDef.params.every((requiredParam) =>
+    Object.prototype.hasOwnProperty.call(step.params, requiredParam)
+  );
+}
 
-## 2. Environment Variables (`.env.local`)
+/**
+ * Validates an entire plan: structure (Zod) + per-step param completeness.
+ * This is the single gate every LLM response must pass through before
+ * it's allowed anywhere near the approval UI or the executor.
+ */
+export function validatePlan(rawPlan: unknown): {
+  valid: boolean;
+  plan?: Plan;
+  error?: string;
+} {
+  const parsed = PlanSchema.safeParse(rawPlan);
 
-```env
-# Optional: Gemini free-tier API key (or generic LLM_API_URL + LLM_API_KEY)
-# If omitted or rate-limited (HTTP 429), fallbackPlans.ts kicks in automatically.
-GEMINI_API_KEY=your_gemini_key_here
+  if (!parsed.success) {
+    return {
+      valid: false,
+      error: "Plan failed schema validation: " + parsed.error.message,
+    };
+  }
 
-# Keep "true" until P2 and P4 endpoints are live, then flip to "false"
-USE_MOCKS=true
-P2_API_URL=http://localhost:3000/api
-P4_API_URL=http://localhost:3000/api
-```
+  const allStepsValid = parsed.data.every(validateStepParams);
+  if (!allStepsValid) {
+    return { valid: false, error: "One or more steps missing required params" };
+  }
 
----
-
-## 3. Integrated Security Measures (`lib/agent/security.ts`)
-
-All security checks follow the exact `throw UnauthorizedError -> orchestrator catches -> logAudit() -> clean UI error` pattern:
-1. **`assertCanApprove(user)`**: Enforces that only `admin` can approve or reject a run (`403` + `APPROVE_DENIED_UNAUTHORIZED` in audit log).
-2. **`assertSafeAndPrivatePrompt(prompt)`**: Blocks prompt-injection/XSS/SQLi patterns (`PROMPT_BLOCKED_SECURITY`) and scrubs accidentally pasted API keys, card numbers, or emails before calling the external LLM.
-3. **`assertWithinRateLimit(userId)`**: Sliding-window cap (15 requests / 60s) to protect free-tier LLM quotas.
-4. **`assertNotReplayedApproval(runId)`**: Atomic lock preventing double-click or replay attacks from sending duplicate campaigns or double-billing usage.
-5. **`scrubSensitivePayload(payload)`**: Redacts secrets and masks emails in step outputs and audit log entries.
+  return { valid: true, plan: parsed.data };
+}
