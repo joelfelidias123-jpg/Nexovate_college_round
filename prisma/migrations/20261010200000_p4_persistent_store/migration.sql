@@ -1,0 +1,6 @@
+CREATE TABLE "P4Store" (
+    "id" TEXT NOT NULL,
+    "state" JSONB NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "P4Store_pkey" PRIMARY KEY ("id")
+);

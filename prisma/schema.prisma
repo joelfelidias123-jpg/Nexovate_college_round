@@ -231,3 +231,17 @@ model AuditLog {
   outcome     String
   createdAt   DateTime  @default(now())
 }
+
+// P4's demo modules share one durable JSON state row. The row is isolated from
+// P1's CRM/agent tables and is locked inside a transaction for every update.
+model P4Store {
+  id        String   @id
+  state     Json
+  updatedAt DateTime @updatedAt
+}
+
+model P4InvoiceIdempotency {
+  idempotencyKey String   @id
+  invoiceId      String
+  createdAt      DateTime @default(now())
+}
