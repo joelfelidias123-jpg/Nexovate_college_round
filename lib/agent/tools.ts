@@ -1,27 +1,11 @@
-/** P3 tool allowlist shared by the planner, validator, and executor. */
-export const TOOL_REGISTRY = Object.freeze({
-  createLandingPage: {
-    description: "Create a website landing page.",
-    params: ["template", "title", "slug"],
-  },
-  publishSite: {
-    description: "Publish an existing website.",
-    params: ["siteId"],
-  },
-  createWebinar: {
-    description: "Create a webinar with a date and time.",
-    params: ["title", "date", "time"],
-  },
-  draftCampaign: {
-    description: "Draft an email campaign.",
-    params: ["audience", "webinarId"],
-  },
-  scheduleCampaign: {
-    description: "Schedule a campaign for delivery.",
-    params: ["campaignId", "sendAt"],
-  },
-  recordUsage: {
-    description: "Record a metered usage event.",
-    params: ["workspaceId", "metric", "qty"],
-  },
-} as const);
+﻿export const TOOL_REGISTRY = {
+  createLandingPage: { module: "P2", params: ["template", "title", "slug"] as const },
+  publishSite: { module: "P2", params: ["siteId"] as const },
+  createWebinar: { module: "P2", params: ["title", "date", "time"] as const },
+  draftCampaign: { module: "P4", params: ["audience", "webinarId"] as const },
+  scheduleCampaign: { module: "P4", params: ["campaignId", "sendAt"] as const },
+  recordUsage: { module: "P4", params: ["workspaceId", "metric", "qty"] as const },
+  notifyCRM: { module: "P1", params: ["webinarId", "source"] as const },
+} as const;
+
+export type ToolName = keyof typeof TOOL_REGISTRY;

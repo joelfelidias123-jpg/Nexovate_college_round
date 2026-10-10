@@ -1,70 +1,40 @@
-// ============================================================================
-// FILE: lib/agent/schemas.ts — Zod Validation (the safety net)
-// ============================================================================
+﻿import { TOOL_REGISTRY, ToolName } from "./tools";
 
-import { z } from "zod";
-import { TOOL_REGISTRY } from "./tools";
+export interface PlanStep {
+  tool: ToolName | string;
+  params: Record<string, unknown>;
+}
 
-// Build a runtime-checkable enum of tool names from the registry keys.
-// If someone adds a tool to TOOL_REGISTRY but forgets to update this,
-// TypeScript will complain — keeps the two in sync automatically.
-const toolNames = Object.keys(TOOL_REGISTRY) as [string, ...string[]];
+export type Plan = PlanStep[];
+const validToolNames = new Set<string>(Object.keys(TOOL_REGISTRY));
 
-// Schema for ONE step in a plan. `params` is loosely typed here
-// (z.record(z.string(), z.any())) because each tool has different params —
-// we do a second, stricter check per-tool in validateStepParams() below.
-export const PlanStepSchema = z.object({
-  tool: z.enum(toolNames),
-  params: z.record(z.string(), z.any()),
-});
+export const PlanSchema = {
+  safeParse(rawPlan: unknown): { success: boolean; data?: Plan; error?: { message: string } } {
+    if (!Array.isArray(rawPlan) || rawPlan.length === 0) {
+      return { success: false, error: { message: "Expected a non-empty array of plan steps" } };
+    }
+    for (let i = 0; i < rawPlan.length; i++) {
+      const item = rawPlan[i] as Record<string, unknown>;
+      if (!item || typeof item !== "object" || typeof item.tool !== "string" || !validToolNames.has(item.tool)) {
+        return { success: false, error: { message: `Step ${i} has unauthorized tool` } };
+      }
+      if (!item.params || typeof item.params !== "object" || Array.isArray(item.params)) {
+        return { success: false, error: { message: `Step ${i} is missing params` } };
+      }
+    }
+    return { success: true, data: rawPlan as Plan };
+  },
+};
 
-// A full plan is just an array of valid steps (must have at least 1 step).
-export const PlanSchema = z.array(PlanStepSchema).min(1);
-
-export type PlanStep = z.infer<typeof PlanStepSchema>;
-export type Plan = z.infer<typeof PlanSchema>;
-
-/**
- * Second-layer check: does this specific tool call have all the
- * params it needs? This catches cases where the LLM picks a valid
- * tool name but forgets/mangles a required field.
- *
- * Returns true/false instead of throwing — caller decides what to do
- * (e.g. fall back to cached plan) so the agent never hard-crashes
- * on bad LLM output.
- */
 export function validateStepParams(step: PlanStep): boolean {
   const toolDef = TOOL_REGISTRY[step.tool as keyof typeof TOOL_REGISTRY];
   if (!toolDef) return false;
-
-  return toolDef.params.every((requiredParam) =>
-    Object.prototype.hasOwnProperty.call(step.params, requiredParam)
-  );
+  return toolDef.params.every((p) => Object.prototype.hasOwnProperty.call(step.params, p));
 }
 
-/**
- * Validates an entire plan: structure (Zod) + per-step param completeness.
- * This is the single gate every LLM response must pass through before
- * it's allowed anywhere near the approval UI or the executor.
- */
-export function validatePlan(rawPlan: unknown): {
-  valid: boolean;
-  plan?: Plan;
-  error?: string;
-} {
+export function validatePlan(rawPlan: unknown): { valid: boolean; plan?: Plan; error?: string } {
   const parsed = PlanSchema.safeParse(rawPlan);
-
-  if (!parsed.success) {
-    return {
-      valid: false,
-      error: "Plan failed schema validation: " + parsed.error.message,
-    };
-  }
-
-  const allStepsValid = parsed.data.every(validateStepParams);
-  if (!allStepsValid) {
-    return { valid: false, error: "One or more steps missing required params" };
-  }
-
+  if (!parsed.success || !parsed.data) return { valid: false, error: parsed.error?.message };
+  if (!parsed.data.every(validateStepParams)) return { valid: false, error: "Step missing required params" };
   return { valid: true, plan: parsed.data };
 }
