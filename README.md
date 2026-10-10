@@ -20,7 +20,7 @@ Nexovate is a Next.js demo workspace for subscription billing, webinars, website
 
 ## Deploy
 
-Deploy the Next.js app to a Node-compatible host and configure `DATABASE_URL`, email settings, `NEXT_PUBLIC_APP_URL`, and any AI/scheduler settings in that host's environment variables. Run `npm run db:generate`, `npm run db:migrate`, and `npm run db:seed` as part of the release workflow before serving traffic. `npm run build` checks the production bundle; `npm run start` starts it.
+Deploy the Next.js app to a Node-compatible host and configure `DATABASE_URL`, email settings, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_BASE_URL`, and any AI/scheduler settings in that host's environment variables. `NEXT_PUBLIC_BASE_URL` is used by published site pages to fetch their saved content. Run `npm run db:generate`, `npm run db:migrate`, and `npm run db:seed` as part of the release workflow before serving traffic. `npm run build` checks the production bundle; `npm run start` starts it.
 
 Campaign sending is scheduled work: configure a hosted scheduler to call `POST /api/campaigns/run` at the desired interval and set `SCHEDULER_SECRET`. Use SMTP credentials from a real provider to deliver mail; the console driver only logs messages. Webinar join/replay links must point to a configured webinar provider. Billing payments remain simulated and invoices are marked paid by the demo flow.
 
@@ -34,7 +34,7 @@ The P4 API routes are currently demo APIs without authentication or tenant autho
 | GET, PATCH | `/api/webinars/:id` | Read a webinar (including registrations) or update it; `:id` may be its slug |
 | GET, POST | `/api/registrations` | List registrations (optional `?webinarId=...`) or register an attendee |
 | GET, POST | `/api/attendance` | List check-ins (optional `?webinarId=...`) or check in a registration |
-| GET, POST | `/api/sites` | List sites or create a site |
+| GET, POST | `/api/sites` | List/create P4 sites; supports P2 builder `siteId`/`slug` reads and save/publish writes with the existing response shapes |
 | GET, PATCH | `/api/sites/:slug` | Read or update a site |
 | GET, POST | `/api/billing` | Read billing state or close due billing periods / simulate payment |
 | GET, POST | `/api/campaigns` | List campaigns or create a campaign draft |
