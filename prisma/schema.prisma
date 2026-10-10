@@ -1,0 +1,233 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  WON
+}
+
+enum LeadSource {
+  SITE
+  WEBINAR
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+}
+
+enum Audience {
+  ALL_LEADS
+  REGISTERED_LEADS
+}
+
+enum EventType {
+  OPEN
+  CLICK
+}
+
+enum RunStatus {
+  AWAITING_APPROVAL
+  RUNNING
+  COMPLETED
+  REJECTED
+  FAILED
+}
+
+model Workspace {
+  id        String        @id @default(cuid())
+  name      String
+  planId    String?
+  plan      Plan?         @relation(fields: [planId], references: [id])
+  createdAt DateTime      @default(now())
+  users     User[]
+  leads     Lead[]
+  sites     Site[]
+  webinars  Webinar[]
+  campaigns Campaign[]
+  usage     UsageRecord[]
+  invoices  Invoice[]
+  runs      AgentRun[]
+  auditLogs AuditLog[]
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  name         String
+  passwordHash String
+  role         Role       @default(MEMBER)
+  workspaceId  String
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id])
+  createdAt    DateTime   @default(now())
+  runs         AgentRun[]
+  auditLogs    AuditLog[]
+}
+
+model Lead {
+  id             String          @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id])
+  name           String
+  email          String
+  status         LeadStatus      @default(NEW)
+  source         LeadSource
+  createdAt      DateTime        @default(now())
+  events         LeadEvent[]
+  registrations  Registration[]
+  campaignEvents CampaignEvent[]
+
+  @@unique([workspaceId, email])
+}
+
+model LeadEvent {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type      String
+  note      String
+  createdAt DateTime @default(now())
+}
+
+model Site {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  name        String
+  slug        String    @unique
+  template    String
+  content     Json?
+  html        String?
+  published   Boolean   @default(false)
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  webinars    Webinar[]
+}
+
+model Webinar {
+  id            String         @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id])
+  siteId        String?
+  site          Site?          @relation(fields: [siteId], references: [id])
+  title         String
+  description   String?
+  startsAt      DateTime
+  roomName      String
+  createdAt     DateTime       @default(now())
+  registrations Registration[]
+}
+
+model Registration {
+  id           String    @id @default(cuid())
+  webinarId    String
+  webinar      Webinar   @relation(fields: [webinarId], references: [id], onDelete: Cascade)
+  leadId       String
+  lead         Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  registeredAt DateTime  @default(now())
+  attended     Boolean   @default(false)
+  attendedAt   DateTime?
+
+  @@unique([webinarId, leadId])
+}
+
+model Campaign {
+  id          String          @id @default(cuid())
+  workspaceId String
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id])
+  name        String
+  subject     String
+  body        String
+  audience    Audience        @default(ALL_LEADS)
+  status      CampaignStatus  @default(DRAFT)
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  recipients  Int             @default(0)
+  createdAt   DateTime        @default(now())
+  events      CampaignEvent[]
+}
+
+model CampaignEvent {
+  id         String    @id @default(cuid())
+  campaignId String
+  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leadId     String?
+  lead       Lead?     @relation(fields: [leadId], references: [id])
+  type       EventType
+  createdAt  DateTime  @default(now())
+}
+
+model Plan {
+  id            String      @id @default(cuid())
+  name          String      @unique
+  monthlyPrice  Int
+  includedUnits Int
+  overageRate   Float
+  workspaces    Workspace[]
+}
+
+model UsageRecord {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  metric      String
+  quantity    Int
+  createdAt   DateTime  @default(now())
+}
+
+model Invoice {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  periodStart DateTime
+  periodEnd   DateTime
+  baseAmount  Float
+  usageAmount Float
+  total       Float
+  status      String    @default("OPEN")
+  lineItems   Json?
+  createdAt   DateTime  @default(now())
+}
+
+model AgentRun {
+  id          String     @id @default(cuid())
+  workspaceId String
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id])
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  prompt      String
+  plan        Json?
+  status      RunStatus  @default(AWAITING_APPROVAL)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  auditLogs   AuditLog[]
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  runId       String?
+  run         AgentRun? @relation(fields: [runId], references: [id])
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id])
+  tool        String
+  input       Json?
+  output      Json?
+  outcome     String
+  createdAt   DateTime  @default(now())
+}
