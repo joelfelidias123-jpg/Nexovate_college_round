@@ -25,6 +25,9 @@ export function registerLeadFormBlock(editor: Editor) {
         <div id="nexus-thank-you" style="display: none;" class="text-center py-6 text-emerald-600 font-semibold">
           Thank you for signing up!
         </div>
+        <div id="nexus-error" style="display: none;" class="text-center py-3 text-red-600 text-sm font-medium">
+          Submission failed. Please try again.
+        </div>
       </div>
       <script>
         (function() {
@@ -32,12 +35,17 @@ export function registerLeadFormBlock(editor: Editor) {
           if (!form) return;
           form.addEventListener('submit', async function(e) {
             e.preventDefault();
+            var errorEl = document.getElementById('nexus-error');
+            if (errorEl) {
+              errorEl.style.display = 'none';
+              errorEl.textContent = 'Submission failed. Please try again.';
+            }
+
             var formData = new FormData(form);
             var data = {
               name: formData.get('name'),
               email: formData.get('email'),
-              source: 'site',
-              siteId: 'site_123'
+              source: 'SITE'
             };
 
             try {
@@ -46,18 +54,30 @@ export function registerLeadFormBlock(editor: Editor) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
               });
+
               if (res.ok) {
                 form.style.display = 'none';
                 var thankYou = document.getElementById('nexus-thank-you');
-                if (thankYou) {
-                  thankYou.style.display = 'block';
+                if (thankYou) thankYou.style.display = 'block';
+              } else if (res.status === 400) {
+                var json = await res.json().catch(function() { return null; });
+                var message = (json && (json.error || json.message)) ? (json.error || json.message) : 'Invalid input. Please check your details.';
+                if (errorEl) {
+                  errorEl.textContent = message;
+                  errorEl.style.display = 'block';
                 }
               } else {
-                alert('Submission failed. Please try again.');
+                if (errorEl) {
+                  errorEl.textContent = 'Submission failed. Please try again.';
+                  errorEl.style.display = 'block';
+                }
               }
             } catch (err) {
               console.error('Submission error:', err);
-              alert('An error occurred.');
+              if (errorEl) {
+                errorEl.textContent = 'Submission failed. Please try again.';
+                errorEl.style.display = 'block';
+              }
             }
           });
         })();
