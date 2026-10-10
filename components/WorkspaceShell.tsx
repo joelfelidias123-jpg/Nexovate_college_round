@@ -6,8 +6,10 @@ import type { ReactNode } from "react";
 
 const navigation = [
   { href: "/", label: "Overview", icon: "⌂" },
-  { href: "/billing", label: "Billing", icon: "◈" },
+  { href: "/crm", label: "CRM", icon: "◉" },
   { href: "/marketing", label: "Marketing", icon: "↗" },
+  { href: "/billing", label: "Billing", icon: "◈" },
+  { href: "/analytics", label: "Analytics", icon: "▤" },
 ];
 
 export function WorkspaceShell({ children, eyebrow, title, action }: { children: ReactNode; eyebrow: string; title: string; action?: ReactNode }) {
