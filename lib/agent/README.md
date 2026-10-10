@@ -1,12 +1,6 @@
-# Nexus P3 (AI Agent + Security)
-- `tools.ts`: Frozen TOOL_REGISTRY contract (P2 & P4)
-- `schemas.ts`: Zod validation + per-step param check
-- `fallbackPlans.ts`: Hardcoded safety net for the 3 rehearsed demo prompts
-- `llmPlanner.ts`: Provider-agnostic LLM call (3s timeout -> fallback)
-- `security.ts`: Role gate (assertCanApprove) + prompt/PII/rate-limit/replay guards
-- `orchestrator.ts` & `executor.ts`: Sequential step runner + audit logging
+﻿# Nexus P3 — AI Agent & Security Module
 
-## How to Run
-1. Set `USE_MOCKS=true` (and optional `GEMINI_API_KEY`) in `.env.local`
-2. Run `npm install zod` and `npm run dev`
-3. Open `http://localhost:3000/agent`
+## Locked Demo Prompts
+1. `"Next Friday ke liye webinar launch karo"` (or `"Launch a webinar for next Friday"`)
+2. `"Send a follow-up campaign to registered leads"`
+3. `"Publish the SaaS landing page"`
