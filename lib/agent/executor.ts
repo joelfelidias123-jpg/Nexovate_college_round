@@ -1,112 +1,104 @@
 // ============================================================================
-// FILE: lib/agent/toolClients.ts — Calls Out to P1/P2/P4 (mockable)
+// FILE: lib/agent/executor.ts — Runs the Plan Step-by-Step
 // ============================================================================
-// This file is the bridge between your tool registry and teammates'
-// real APIs. Each function below should hit their actual endpoint.
-// Until their endpoints are ready, these return realistic FAKE data
-// so you can build/test your entire pipeline independently.
-//
-// Swap USE_MOCKS to "false" in .env.local once real endpoints are confirmed working.
 
-const USE_MOCKS = process.env.USE_MOCKS !== "false";
+import { getSteps, updateStepStatus, updateRunStatus } from "./db";
+import { logAudit } from "./audit";
+import { TOOL_CLIENTS } from "./toolClients";
+import { scrubSensitivePayload } from "./security";
 
-async function realCall(url: string, body: Record<string, unknown>) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`Tool call to ${url} failed: ${res.status}`);
-  return res.json();
-}
-
-// --- P2: Website Builder + Webinars ---
-
-export async function createLandingPage(params: Record<string, unknown>) {
-  if (USE_MOCKS) {
-    return {
-      siteId: "mock-site-1",
-      slug: params.slug ?? "nexus-webinar",
-      url: `/s/${params.slug ?? "nexus-webinar"}`,
-    };
+/**
+ * Resolves placeholders like "{{webinarId}}", "{{campaignId}}", or "{{siteId}}"
+ * in a step's input using outputs collected from earlier steps in the same run.
+ * This ensures sequential handoffs between P2 and P4 work seamlessly.
+ */
+function resolveStepPlaceholders(
+  input: Record<string, unknown>,
+  contextOutputs: Record<string, unknown>
+): Record<string, unknown> {
+  const resolved: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(input)) {
+    if (typeof val === "string" && val.startsWith("{{") && val.endsWith("}}")) {
+      const tokenKey = val.slice(2, -2).trim();
+      resolved[key] = contextOutputs[tokenKey] ?? val;
+    } else {
+      resolved[key] = val;
+    }
   }
-  return realCall(`${process.env.P2_API_URL}/sites`, params);
+  return resolved;
 }
 
-export async function publishSite(params: Record<string, unknown>) {
-  if (USE_MOCKS) {
-    return {
-      published: true,
-      siteId: params.siteId ?? "mock-site-1",
-      url: "/s/nexus-webinar",
-    };
+/**
+ * Executes every step of an approved run, IN ORDER.
+ *
+ * Critical design choice: one step failing does NOT crash the whole
+ * run or throw an unhandled exception up to the UI. Each step's
+ * success/failure is tracked independently so the timeline can show
+ * partial progress — this is what separates "robust system" from
+ * "fragile prototype" in a live demo.
+ */
+export async function executeRun(runId: string): Promise<void> {
+  await updateRunStatus(runId, "EXECUTING");
+  await logAudit(runId, "agent", "RUN_EXECUTION_STARTED");
+
+  const steps = await getSteps(runId);
+
+  // Accumulate outputs across steps so "{{webinarId}}", "{{campaignId}}", etc.
+  // resolve to real IDs returned by earlier steps.
+  const accumulatedOutputs: Record<string, unknown> = {
+    existingSaasSiteId: "saas-site-default-1",
+    latestWebinarId: "webinar-latest-1",
+  };
+
+  for (const step of steps) {
+    const resolvedInput = resolveStepPlaceholders(
+      step.input,
+      accumulatedOutputs
+    );
+    const safeInput = scrubSensitivePayload(resolvedInput);
+
+    await updateStepStatus(step.id, runId, "RUNNING");
+    await logAudit(
+      runId,
+      "agent",
+      `TOOL_CALL_STARTED:${step.tool_name}`,
+      safeInput
+    );
+
+    try {
+      const toolFn = TOOL_CLIENTS[step.tool_name];
+      if (!toolFn) {
+        throw new Error(`No client registered for tool: ${step.tool_name}`);
+      }
+
+      const result = (await toolFn(resolvedInput)) as Record<string, unknown>;
+      Object.assign(accumulatedOutputs, result);
+
+      const safeResult = scrubSensitivePayload(result);
+
+      await updateStepStatus(step.id, runId, "SUCCESS", safeResult);
+      await logAudit(
+        runId,
+        "agent",
+        `TOOL_CALL_SUCCESS:${step.tool_name}`,
+        safeResult
+      );
+    } catch (err) {
+      const errorMsg = (err as Error).message;
+
+      await updateStepStatus(step.id, runId, "FAILED", { error: errorMsg });
+      await logAudit(runId, "agent", `TOOL_CALL_FAILED:${step.tool_name}`, {
+        error: errorMsg,
+      });
+
+      // Design decision: we STOP the run on first failure rather than
+      // continuing blindly (later steps may depend on this one's output,
+      // e.g. webinarId feeding into draftCampaign).
+      await updateRunStatus(runId, "FAILED");
+      return;
+    }
   }
-  return realCall(`${process.env.P2_API_URL}/sites/publish`, params);
+
+  await updateRunStatus(runId, "COMPLETED");
+  await logAudit(runId, "agent", "RUN_EXECUTION_COMPLETED");
 }
-
-export async function createWebinar(params: Record<string, unknown>) {
-  if (USE_MOCKS) {
-    return {
-      webinarId: "mock-webinar-1",
-      title: params.title ?? "Nexus Webinar",
-      date: params.date ?? "next-friday",
-      time: params.time ?? "18:00",
-      jitsiUrl: "https://meet.jit.si/nexus-webinar-next-friday",
-    };
-  }
-  return realCall(`${process.env.P2_API_URL}/webinars`, params);
-}
-
-// --- P4: Billing + Marketing ---
-
-export async function draftCampaign(params: Record<string, unknown>) {
-  if (USE_MOCKS) {
-    return {
-      campaignId: "mock-campaign-1",
-      audience: params.audience ?? "All leads",
-      webinarId: params.webinarId ?? "mock-webinar-1",
-      subject: "[Live Next Friday] Join the Nexus AI Workflow Masterclass",
-    };
-  }
-  return realCall(`${process.env.P4_API_URL}/campaigns/draft`, params);
-}
-
-export async function scheduleCampaign(params: Record<string, unknown>) {
-  if (USE_MOCKS) {
-    return {
-      scheduled: true,
-      campaignId: params.campaignId ?? "mock-campaign-1",
-      sendAt: params.sendAt ?? "now",
-      recipientsDispatched: 20,
-    };
-  }
-  return realCall(`${process.env.P4_API_URL}/campaigns/schedule`, params);
-}
-
-export async function recordUsage(params: Record<string, unknown>) {
-  if (USE_MOCKS) {
-    return {
-      invoiceId: "mock-invoice-1",
-      workspaceId: params.workspaceId ?? "ws-nexus-1",
-      metric: params.metric ?? "webinar_launch_workflow",
-      qty: params.qty ?? 1,
-    };
-  }
-  return realCall(`${process.env.P4_API_URL}/billing/usage`, params);
-}
-
-// --- Dispatcher: maps tool name -> actual function above ---
-// This is what the executor calls. Keeps executor.ts clean and
-// agnostic of HTTP details.
-
-export const TOOL_CLIENTS: Record<
-  string,
-  (params: Record<string, unknown>) => Promise<unknown>
-> = {
-  createLandingPage,
-  publishSite,
-  createWebinar,
-  draftCampaign,
-  scheduleCampaign,
-  recordUsage,
-};

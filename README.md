@@ -40,6 +40,8 @@ The console driver prints messages locally. For sandbox SMTP delivery, set `EMAI
 
 Set `GEMINI_API_KEY` to draft campaign copy with Gemini. Without it, the app creates an editable starter draft. Campaign scheduling stores the requested send time; call `POST /api/campaigns/run` from a scheduler to send campaigns that are due. Set `NEXT_PUBLIC_APP_URL` to the public base URL when using tracking links. Open counts are approximate because some email clients block tracking pixels.
 
+The P3 agent uses hardcoded mock P2/P4 tool clients by default (`USE_MOCKS=true`) so its approval flow can run without the other services. Its planner falls back to the rehearsed prompts if no LLM key is configured. Set `USE_MOCKS=false` only after the P2/P4 request and response contracts are connected.
+
 ## Billing demo rules
 
 Money is stored as integer cents; periods are invoiced in arrears; billing helpers accept an explicit `now` for demos. Billing changes are saved in the local database transactionally and invoice idempotency keys are unique. Payments are simulated and invoices are marked paid.
