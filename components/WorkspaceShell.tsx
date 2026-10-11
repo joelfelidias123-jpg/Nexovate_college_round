@@ -5,8 +5,10 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 const navigation = [
-  { href: "/", label: "Overview", icon: "⌂" },
+  { href: "/agent", label: "Agent", icon: "✦" },
+  { href: "/builder", label: "Site", icon: "▣" },
   { href: "/crm", label: "CRM", icon: "◉" },
+  { href: "/webinars", label: "Webinars", icon: "◐" },
   { href: "/marketing", label: "Marketing", icon: "↗" },
   { href: "/billing", label: "Billing", icon: "◈" },
   { href: "/analytics", label: "Analytics", icon: "▤" },
