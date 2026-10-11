@@ -1,13 +1,13 @@
 ﻿import { Plan } from "./schemas";
 
 const HERO_WEBINAR_PLAN: Plan = [
-  { tool: "createLandingPage", params: { template: "webinar", title: "Nexus Webinar", slug: "nexus-webinar" } },
+  { tool: "createLandingPage", params: { template: "webinar-landing", title: "Nexus Webinar", slug: "nexus-webinar" } },
   { tool: "publishSite", params: { siteId: "{{siteId}}" } },
-  { tool: "createWebinar", params: { title: "Nexus Webinar", date: "next-friday", time: "18:00" } },
+  { tool: "createWebinar", params: { title: "Nexus Webinar", date: "2026-10-16", time: "18:00" } },
   { tool: "draftCampaign", params: { audience: "All leads", webinarId: "{{webinarId}}" } },
   { tool: "scheduleCampaign", params: { campaignId: "{{campaignId}}", sendAt: "now" } },
-  { tool: "notifyCRM", params: { webinarId: "{{webinarId}}", source: "webinar" } },
-  { tool: "recordUsage", params: { workspaceId: "ws-nexus-1", metric: "webinar_launch_workflow", qty: 1 } }
+  { tool: "notifyCRM", params: { webinarId: "{{webinarId}}", source: "WEBINAR" } },
+  { tool: "recordUsage", params: { workspaceId: "ws_demo", metric: "webinar_launch_workflow", qty: 1 } }
 ];
 
 export const FALLBACK_PLANS: Record<string, Plan> = {
@@ -16,8 +16,8 @@ export const FALLBACK_PLANS: Record<string, Plan> = {
   "send a follow-up campaign to registered leads": [
     { tool: "draftCampaign", params: { audience: "Registered leads", webinarId: "{{latestWebinarId}}" } },
     { tool: "scheduleCampaign", params: { campaignId: "{{campaignId}}", sendAt: "now" } },
-    { tool: "notifyCRM", params: { webinarId: "{{latestWebinarId}}", source: "webinar" } },
-    { tool: "recordUsage", params: { workspaceId: "ws-nexus-1", metric: "followup_campaign", qty: 1 } }
+    { tool: "notifyCRM", params: { webinarId: "{{latestWebinarId}}", source: "WEBINAR" } },
+    { tool: "recordUsage", params: { workspaceId: "ws_demo", metric: "followup_campaign", qty: 1 } }
   ],
   "publish the saas landing page": [
     { tool: "publishSite", params: { siteId: "{{existingSaasSiteId}}" } }

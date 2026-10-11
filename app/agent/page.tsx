@@ -1,5 +1,6 @@
 ﻿"use client";
 import React, { useEffect, useState, useCallback } from "react";
+import { WorkspaceShell } from "@/components/WorkspaceShell";
 
 const REHEARSED_PROMPTS = [
   "Next Friday ke liye webinar launch karo",
@@ -19,7 +20,11 @@ const TOOL_LABELS: Record<string, string> = {
 
 export default function AgentPage() {
   const [activeTab, setActiveTab] = useState<"timeline" | "audit">("timeline");
-  const [user, setUser] = useState<{ id: string; role: "admin" | "member" }>({ id: "user-admin-1", role: "admin" });
+  const [user, setUser] = useState<{ id: string; email?: string; role: "admin" | "member" }>({
+    id: "user-admin-1",
+    email: "admin@nexus.demo",
+    role: "admin",
+  });
   const [prompt, setPrompt] = useState("Next Friday ke liye webinar launch karo");
   const [currentRun, setCurrentRun] = useState<any>(null);
   const [steps, setSteps] = useState<any[]>([]);
@@ -47,7 +52,47 @@ export default function AgentPage() {
     if (auditRes.ok) setAuditLog((await auditRes.json()).log ?? []);
   }, [fetchRunDetails]);
 
-  useEffect(() => { fetchHistoryAndAudit(true); }, [fetchHistoryAndAudit]);
+  useEffect(() => {
+    async function initAuthAndLoad() {
+      try {
+        const meRes = await fetch("/api/auth/me");
+        const meData = await meRes.json().catch(() => ({}));
+        if (meData?.user) {
+          setUser({ id: meData.user.id, email: meData.user.email, role: meData.user.role.toLowerCase() as "admin" | "member" });
+        } else {
+          const loginRes = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: "admin@nexus.demo", password: "demo1234" }),
+          });
+          const loginData = await loginRes.json().catch(() => ({}));
+          if (loginData?.user) {
+            setUser({ id: loginData.user.id, email: loginData.user.email, role: loginData.user.role.toLowerCase() as "admin" | "member" });
+          }
+        }
+      } catch {}
+      await fetchHistoryAndAudit(true);
+    }
+    initAuthAndLoad();
+  }, [fetchHistoryAndAudit]);
+
+  async function handleRoleSwitch(nextRole: "admin" | "member") {
+    setErrorMsg(null);
+    const email = nextRole === "admin" ? "admin@nexus.demo" : "member@nexus.demo";
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: "demo1234" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.user) {
+        setUser({ id: data.user.id, email: data.user.email, role: data.user.role.toLowerCase() as "admin" | "member" });
+        return;
+      }
+    } catch {}
+    setUser({ id: nextRole === "admin" ? "user-admin-1" : "user-member-2", email, role: nextRole });
+  }
 
   async function handleSubmitPrompt(e?: React.FormEvent, overridePrompt?: string) {
     if (e) e.preventDefault();
@@ -84,7 +129,7 @@ export default function AgentPage() {
         body: JSON.stringify({ runId: currentRun.id, user }),
       });
       const data = await res.json();
-      if (!res.ok) setErrorMsg(data.error || "Action not authorized");
+      if (!res.ok) setErrorMsg(data.error || "Forbidden: Only admins can approve runs.");
       else await fetchRunDetails(currentRun.id);
       await fetchHistoryAndAudit(false);
     } catch (err: any) { setErrorMsg(err.message || "Request failed"); }
@@ -92,136 +137,112 @@ export default function AgentPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground p-6 font-sans">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex items-center justify-between border-b pb-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">AI Agent</h1>
-            <p className="text-sm text-muted-foreground">Execute multi-step workflows across modules with approval gates.</p>
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Role:</span>
-            <select
-              value={user.role}
-              onChange={(e) => {
-                setErrorMsg(null);
-                const role = e.target.value as "admin" | "member";
-                setUser({ id: role === "admin" ? "user-admin-1" : "user-member-2", role });
-              }}
-              className="border rounded-md px-2.5 py-1.5 bg-background text-foreground font-medium"
-            >
-              <option value="admin">admin</option>
-              <option value="member">member</option>
-            </select>
-          </div>
+    <WorkspaceShell
+      eyebrow="AUTONOMOUS WORKFLOWS"
+      title="AI Agent"
+      action={
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="muted-copy" style={{ fontSize: 12 }}>Signed in as:</span>
+          <select className="lead-select" value={user.role} onChange={(e) => handleRoleSwitch(e.target.value as "admin" | "member")}>
+            <option value="admin">admin@nexus.demo (ADMIN)</option>
+            <option value="member">member@nexus.demo (MEMBER)</option>
+          </select>
         </div>
+      }
+    >
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button type="button" className={`button ${activeTab === "timeline" ? "button-dark" : "button-outline"}`} onClick={() => setActiveTab("timeline")}>Workflow &amp; Plan</button>
+        <button type="button" className={`button ${activeTab === "audit" ? "button-dark" : "button-outline"}`} onClick={() => { setActiveTab("audit"); fetchHistoryAndAudit(false); }}>Audit Log ({auditLog.length})</button>
+      </div>
 
-        <div className="flex items-center gap-2 border-b pb-2">
-          <button type="button" onClick={() => setActiveTab("timeline")} className={`px-3 py-1.5 rounded-md text-sm font-medium ${activeTab === "timeline" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Workflow &amp; Plan</button>
-          <button type="button" onClick={() => { setActiveTab("audit"); fetchHistoryAndAudit(false); }} className={`px-3 py-1.5 rounded-md text-sm font-medium ${activeTab === "audit" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Audit Log ({auditLog.length})</button>
-        </div>
+      {errorMsg ? <div className="notice notice-error">{errorMsg}</div> : null}
 
-        {errorMsg && (
-          <div className="p-3.5 rounded-lg border border-destructive/40 bg-destructive/10 text-destructive text-sm flex items-center justify-between">
-            <span>{errorMsg}</span>
-            <button type="button" onClick={() => setErrorMsg(null)} className="text-xs underline ml-4">Dismiss</button>
-          </div>
-        )}
-
-        {activeTab === "timeline" ? (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              <div className="rounded-lg border bg-card text-card-foreground p-5 shadow-sm space-y-4">
-                <form onSubmit={(e) => handleSubmitPrompt(e)} className="flex gap-2.5">
-                  <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Next Friday ke liye webinar launch karo" className="flex-1 rounded-md border bg-background px-3 py-2 text-sm" />
-                  <button type="submit" disabled={loading} className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50 shrink-0">{loading ? "Running..." : "Run Workflow"}</button>
-                </form>
-                <div className="flex flex-wrap gap-1.5">
-                  {REHEARSED_PROMPTS.map((item) => (
-                    <button key={item} type="button" onClick={() => { setPrompt(item); handleSubmitPrompt(undefined, item); }} className="text-xs px-2.5 py-1 rounded-md border bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground">{item}</button>
-                  ))}
-                </div>
-              </div>
-
-              {currentRun && (
-                <div className="rounded-lg border bg-card text-card-foreground p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between border-b pb-3">
-                    <div>
-                      <div className="text-xs text-muted-foreground font-mono">Run #{currentRun.id.slice(0, 8)}</div>
-                      <h2 className="text-base font-semibold">{currentRun.prompt}</h2>
-                    </div>
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full border bg-muted">{currentRun.status}</span>
-                  </div>
-
-                  {currentRun.status === "AWAITING_APPROVAL" && (
-                    <div className="p-4 rounded-lg border bg-muted/40 flex flex-wrap items-center justify-between gap-4">
-                      <div className="space-y-0.5">
-                        <div className="text-sm font-semibold">Approval Required</div>
-                        <p className="text-xs text-muted-foreground">Landing page, webinar, and campaign draft are ready. Approve to send campaign, sync CRM registrations, and generate usage invoice.</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => handleDecision("/api/agent/approve")} disabled={loading} className="px-4 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold">Approve</button>
-                        <button type="button" onClick={() => handleDecision("/api/agent/reject")} disabled={loading} className="px-3 py-1.5 rounded-md border text-xs font-medium text-muted-foreground hover:text-foreground">Reject</button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-2.5">
-                    {steps.map((step, i) => (
-                      <div key={step.id} className="p-3 rounded-md border bg-background space-y-1.5 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold">{i + 1}. {TOOL_LABELS[step.tool_name] ?? step.tool_name}</span>
-                          <span className="font-mono text-[11px] px-2 py-0.5 rounded border bg-muted">{step.status}</span>
-                        </div>
-                        <div className="text-[11px] font-mono text-muted-foreground">Input: {JSON.stringify(step.input)}</div>
-                        {step.output && <div className="text-[11px] font-mono text-foreground">Output: {JSON.stringify(step.output)}</div>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-lg border bg-card text-card-foreground p-5 shadow-sm space-y-3 h-fit">
-              <h3 className="text-sm font-semibold">Run History ({runHistory.length})</h3>
-              <div className="space-y-2">
-                {runHistory.map((r) => (
-                  <button key={r.id} type="button" onClick={() => fetchRunDetails(r.id)} className={`w-full text-left p-2.5 rounded-md border text-xs ${currentRun?.id === r.id ? "border-primary bg-muted" : "bg-background hover:bg-muted/50"}`}>
-                    <div className="flex justify-between text-[10px] text-muted-foreground"><span>#{r.id.slice(0, 8)}</span><span className="font-semibold">{r.status}</span></div>
-                    <div className="truncate font-medium mt-0.5">{r.prompt}</div>
-                  </button>
+      {activeTab === "timeline" ? (
+        <div className="overview-grid">
+          <div style={{ display: "grid", gap: 14 }}>
+            <section className="panel">
+              <div className="panel-heading"><div><div className="eyebrow">PROMPT</div><h3>Launch a multi-step workflow</h3></div></div>
+              <form onSubmit={(e) => handleSubmitPrompt(e)} style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+                <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Next Friday ke liye webinar launch karo" style={{ flex: 1 }} />
+                <button type="submit" disabled={loading} className="button button-primary">{loading ? "Running…" : "Run Workflow"}</button>
+              </form>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {REHEARSED_PROMPTS.map((item) => (
+                  <button key={item} type="button" className="button button-outline" onClick={() => { setPrompt(item); handleSubmitPrompt(undefined, item); }}>{item}</button>
                 ))}
               </div>
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-lg border bg-card text-card-foreground p-5 shadow-sm space-y-3">
-            <h2 className="text-base font-semibold">Audit Log</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b text-muted-foreground">
-                    <th className="py-2 px-3">Time</th>
-                    <th className="py-2 px-3">Actor</th>
-                    <th className="py-2 px-3">Action</th>
-                    <th className="py-2 px-3">Details</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {auditLog.map((entry) => (
-                    <tr key={entry.id}>
-                      <td className="py-2 px-3 font-mono text-muted-foreground">{new Date(entry.timestamp).toLocaleTimeString()}</td>
-                      <td className="py-2 px-3 font-medium">{entry.actor}</td>
-                      <td className="py-2 px-3 font-semibold">{entry.action}</td>
-                      <td className="py-2 px-3 font-mono text-muted-foreground">{JSON.stringify(entry.payload)}</td>
-                    </tr>
+            </section>
+
+            {currentRun && (
+              <section className="panel">
+                <div className="panel-heading">
+                  <div><div className="eyebrow">RUN #{currentRun.id.slice(0, 8)}</div><h3>{currentRun.prompt}</h3></div>
+                  <span className="status-pill pill-green">{currentRun.status}</span>
+                </div>
+
+                {currentRun.status === "AWAITING_APPROVAL" && (
+                  <div className="panel" style={{ marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <b>Approval Required (Admin Gate)</b>
+                      <p className="muted-copy" style={{ margin: "4px 0 0" }}>Landing page, webinar, and campaign draft are ready. Approve to send campaign, sync CRM registrations, and record billing usage.</p>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button type="button" className="button button-primary" disabled={loading} onClick={() => handleDecision("/api/agent/approve")}>Approve</button>
+                      <button type="button" className="button button-outline" disabled={loading} onClick={() => handleDecision("/api/agent/reject")}>Reject</button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="usage-list">
+                  {steps.map((step, i) => (
+                    <div className="usage-row" key={step.id}>
+                      <div className="usage-title">
+                        <b>{i + 1}. {TOOL_LABELS[step.tool_name] ?? step.tool_name}</b>
+                        <small>Input: {JSON.stringify(step.input)}</small>
+                        {step.output ? <small>Output: {JSON.stringify(step.output)}</small> : null}
+                      </div>
+                      <span className="status-pill pill-blue">{step.status}</span>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              </section>
+            )}
           </div>
-        )}
-      </div>
-    </div>
+
+          <section className="panel" style={{ height: "fit-content" }}>
+            <div className="panel-heading">
+              <div><div className="eyebrow">HISTORY</div><h3>Recent Runs</h3></div>
+              <span className="count-pill">{runHistory.length}</span>
+            </div>
+            <div className="usage-list">
+              {runHistory.map((r) => (
+                <button key={r.id} type="button" onClick={() => fetchRunDetails(r.id)} className="usage-row" style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", cursor: "pointer" }}>
+                  <div className="usage-title"><b>{r.prompt}</b><small>#{r.id.slice(0, 8)}</small></div>
+                  <span className="status-pill pill-green">{r.status}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <section className="panel">
+          <div className="panel-heading">
+            <div><div className="eyebrow">COMPLIANCE &amp; SECURITY</div><h3>Audit Log</h3></div>
+            <span className="count-pill">{auditLog.length}</span>
+          </div>
+          <div className="usage-list">
+            {auditLog.map((entry) => (
+              <div className="usage-row" key={entry.id}>
+                <div className="usage-title">
+                  <b>{entry.action} <small>({entry.actor})</small></b>
+                  <small>{JSON.stringify(entry.payload)}</small>
+                </div>
+                <small className="muted-copy">{new Date(entry.timestamp).toLocaleTimeString()}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </WorkspaceShell>
   );
 }
