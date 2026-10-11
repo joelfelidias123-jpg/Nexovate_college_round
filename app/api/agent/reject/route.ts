@@ -1,19 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { requireRole } from "@/lib/auth";
 import { rejectRun } from "@/lib/agent/orchestrator";
 import { getRun, getSteps } from "@/lib/agent/db";
 import { UnauthorizedError } from "@/lib/agent/security";
 
 export async function POST(req: NextRequest) {
+  const { user, error } = await requireRole("ADMIN");
+  if (error) return error;
+
   try {
-    const { runId, user } = await req.json();
-    await rejectRun(runId, user);
-    const run = await getRun(runId);
-    const steps = await getSteps(runId);
-    return NextResponse.json({ status: "REJECTED", run, steps }, { status: 200 });
+    const body = await req.json();
+    await rejectRun(body.runId, { id: user.id, role: user.role.toLowerCase() as "admin" | "member" });
+    const run = await getRun(body.runId);
+    const steps = await getSteps(body.runId);
+    return NextResponse.json({ status: "REJECTED", run, steps });
   } catch (err) {
-    if (err instanceof UnauthorizedError) {
-      return NextResponse.json({ error: err.message }, { status: 403 });
-    }
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    const status = err instanceof UnauthorizedError ? 403 : 400;
+    return NextResponse.json({ error: (err as Error).message }, { status });
   }
 }
