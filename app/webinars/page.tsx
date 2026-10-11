@@ -108,181 +108,209 @@ export default function WebinarsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans p-8 max-w-6xl mx-auto">
-      <header className="flex items-center justify-between mb-8 pb-4 border-b">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-900">Webinars</h1>
-          <p className="text-sm text-zinc-500">Manage and schedule live sessions</p>
-        </div>
-        <Button onClick={() => { setIsOpen(true); setCreatedRegUrl(null); setErrorMessage(''); }}>
-          Create webinar
-        </Button>
-      </header>
+    <div className="min-h-screen bg-[#f6f8f5] font-sans">
+      <main className="max-w-5xl mx-auto p-6 md:p-12">
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10 pb-6 border-b border-[#e9eee9]">
+          <div>
+            <h1 className="text-3xl font-extrabold text-[#20342d] tracking-tight">Webinars</h1>
+            <p className="text-[#667085] mt-1">Schedule and manage your live interactive sessions.</p>
+          </div>
+          <Button
+            onClick={() => { setIsOpen(true); setCreatedRegUrl(null); setErrorMessage(''); }}
+            className="bg-[#2d7659] hover:bg-[#174f3b] text-white shadow-sm"
+          >
+            Create webinar
+          </Button>
+        </header>
 
-      {isOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-lg w-full shadow-lg border">
-            <h2 className="text-xl font-bold text-zinc-900 mb-4">Create New Webinar</h2>
-
-            {createdRegUrl ? (
-              <div className="space-y-4">
-                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-md text-emerald-800 text-sm">
-                  <p className="font-semibold mb-1">Webinar Created Successfully!</p>
-                  <p className="mb-2">Share this public registration link:</p>
-                  <a
-                    href={createdRegUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline font-mono break-all text-emerald-900"
-                  >
-                    {typeof window !== 'undefined' ? window.location.origin : ''}{createdRegUrl}
-                  </a>
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-24 text-[#667085] space-y-4">
+            <div className="w-8 h-8 border-4 border-[#2d7659]/20 border-t-[#2d7659] rounded-full animate-spin"></div>
+            <p className="font-medium">Loading your webinars...</p>
+          </div>
+        ) : webinars.length === 0 ? (
+          <div className="text-center py-24 bg-white rounded-2xl border border-[#e9eee9] shadow-sm px-6">
+            <div className="w-16 h-16 bg-[#f6f8f5] rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-2xl text-[#2d7659]">📅</span>
+            </div>
+            <h3 className="text-lg font-bold text-[#20342d]">No webinars yet</h3>
+            <p className="text-[#667085] mt-2 max-w-sm mx-auto">Click the button above to schedule your first live event and start engaging with your audience.</p>
+          </div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2">
+            {webinars.map((webinar) => (
+              <div key={webinar.id} className="bg-white border border-[#e9eee9] p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:border-[#2d7659]/30 transition-all group">
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                      webinar.status === 'published' ? 'bg-[#eaf4ee] text-[#2d7659]' : 'bg-zinc-100 text-zinc-600'
+                    }`}>
+                      {webinar.status}
+                    </span>
+                    <span className="text-xs text-[#667085] font-medium flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#2d7659]"></span>
+                      {webinar.registrationCount ?? 0} registrations
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-bold text-[#20342d] mb-2 group-hover:text-[#2d7659] transition-colors">{webinar.title}</h2>
+                  <p className="text-sm text-[#667085] mb-6 line-clamp-2 leading-relaxed">{webinar.description || 'No description provided.'}</p>
                 </div>
-                <div className="flex justify-end">
-                  <Button variant="outline" onClick={() => setIsOpen(false)}>
-                    Close
-                  </Button>
+
+                <div className="pt-5 border-t border-[#f6f8f5] mt-auto">
+                  <div className="flex items-center gap-2 mb-4 text-[#20342d] font-medium text-xs">
+                    <span>🕒</span>
+                    {new Date(webinar.startsAt).toLocaleDateString(undefined, { dateStyle: 'long' })} at {new Date(webinar.startsAt).toLocaleTimeString(undefined, { timeStyle: 'short' })}
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <a
+                      href={`/webinar/${webinar.slug || webinar.id}/register`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[#2d7659] text-xs font-bold hover:underline underline-offset-4"
+                    >
+                      Registration Page
+                    </a>
+                    <div className="w-1 h-1 rounded-full bg-[#e9eee9]"></div>
+                    <a
+                      href={`/webinar/${webinar.id}/join`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[#2d7659] text-xs font-bold hover:underline underline-offset-4"
+                    >
+                      Join Meeting
+                    </a>
+                  </div>
                 </div>
               </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* Creation Modal */}
+      {isOpen && (
+        <div className="fixed inset-0 bg-[#20342d]/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl border border-[#e9eee9] animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-extrabold text-[#20342d]">New Webinar</h2>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="text-[#667085] hover:text-[#20342d] transition-colors p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {createdRegUrl ? (
+              <div className="space-y-6">
+                <div className="p-6 bg-[#f6f8f5] border border-[#2d7659]/20 rounded-xl">
+                  <div className="w-10 h-10 bg-[#eaf4ee] rounded-full flex items-center justify-center mb-4">
+                    <span className="text-xl text-[#2d7659]">✅</span>
+                  </div>
+                  <h3 className="font-bold text-[#20342d] mb-1">Webinar Scheduled!</h3>
+                  <p className="text-sm text-[#667085] mb-4">Your registration link is ready to share:</p>
+                  <div className="bg-white p-3 rounded-lg border border-[#e9eee9] flex items-center gap-2">
+                    <input
+                      readOnly
+                      value={`${typeof window !== 'undefined' ? window.location.origin : ''}${createdRegUrl}`}
+                      className="flex-1 text-xs font-mono text-[#20342d] outline-none bg-transparent overflow-hidden text-ellipsis"
+                    />
+                  </div>
+                </div>
+                <Button
+                  className="w-full bg-[#2d7659] hover:bg-[#174f3b] text-white"
+                  onClick={() => setIsOpen(false)}
+                >
+                  Back to List
+                </Button>
+              </div>
             ) : (
-              <form onSubmit={handleCreate} className="space-y-4">
+              <form onSubmit={handleCreate} className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 mb-1">Title</label>
+                  <label className="block text-[11px] font-bold text-[#667085] uppercase tracking-wider mb-1.5">Webinar Title</label>
                   <input
                     type="text"
                     required
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-md text-sm outline-none focus:ring-2 focus:ring-zinc-900"
-                    placeholder="e.g. Masterclass: AI for Business"
+                    className="w-full px-4 py-2.5 bg-[#f6f8f5] border border-[#e9eee9] rounded-xl text-sm outline-none focus:border-[#2d7659] focus:ring-1 focus:ring-[#2d7659] transition-all"
+                    placeholder="e.g. Masterclass: Scaling with AI"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 mb-1">Description</label>
+                  <label className="block text-[11px] font-bold text-[#667085] uppercase tracking-wider mb-1.5">Description</label>
                   <textarea
                     rows={3}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-md text-sm outline-none focus:ring-2 focus:ring-zinc-900"
-                    placeholder="Brief summary of the session..."
+                    className="w-full px-4 py-2.5 bg-[#f6f8f5] border border-[#e9eee9] rounded-xl text-sm outline-none focus:border-[#2d7659] focus:ring-1 focus:ring-[#2d7659] transition-all resize-none"
+                    placeholder="Tell your audience what they will learn..."
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 mb-1">Start Date</label>
+                    <label className="block text-[11px] font-bold text-[#667085] uppercase tracking-wider mb-1.5">Start Date</label>
                     <input
                       type="date"
                       required
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-md text-sm"
+                      className="w-full px-4 py-2.5 bg-[#f6f8f5] border border-[#e9eee9] rounded-xl text-sm outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 mb-1">Start Time</label>
+                    <label className="block text-[11px] font-bold text-[#667085] uppercase tracking-wider mb-1.5">Start Time</label>
                     <input
                       type="time"
                       required
                       value={startTime}
                       onChange={(e) => setStartTime(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-md text-sm"
+                      className="w-full px-4 py-2.5 bg-[#f6f8f5] border border-[#e9eee9] rounded-xl text-sm outline-none"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 mb-1">End Date</label>
+                    <label className="block text-[11px] font-bold text-[#667085] uppercase tracking-wider mb-1.5">End Date</label>
                     <input
                       type="date"
                       required
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-md text-sm"
+                      className="w-full px-4 py-2.5 bg-[#f6f8f5] border border-[#e9eee9] rounded-xl text-sm outline-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-700 mb-1">End Time</label>
+                    <label className="block text-[11px] font-bold text-[#667085] uppercase tracking-wider mb-1.5">End Time</label>
                     <input
                       type="time"
                       required
                       value={endTime}
                       onChange={(e) => setEndTime(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-md text-sm"
+                      className="w-full px-4 py-2.5 bg-[#f6f8f5] border border-[#e9eee9] rounded-xl text-sm outline-none"
                     />
                   </div>
                 </div>
 
                 {errorMessage && (
-                  <p className="text-sm text-red-600 bg-red-50 p-2 rounded border border-red-200">
-                    {errorMessage}
-                  </p>
+                  <div className="p-3 text-xs text-red-600 bg-red-50 rounded-lg border border-red-100 font-medium">
+                    ⚠️ {errorMessage}
+                  </div>
                 )}
 
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" isDisabled={isSubmitting}>
-                    {isSubmitting ? 'Creating...' : 'Create'}
-                  </Button>
-                </div>
+                <Button
+                  type="submit"
+                  className="w-full h-11 bg-[#2d7659] hover:bg-[#174f3b] text-white font-bold"
+                  isDisabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Creating...' : 'Schedule Webinar'}
+                </Button>
               </form>
             )}
           </div>
-        </div>
-      )}
-
-      {loading ? (
-        <p className="text-sm text-zinc-500">Loading webinars...</p>
-      ) : webinars.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-lg border">
-          <p className="text-zinc-600 mb-2">No webinars scheduled yet.</p>
-          <p className="text-xs text-zinc-400">Click &quot;Create webinar&quot; to add your first live event.</p>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {webinars.map((webinar) => (
-            <div key={webinar.id} className="bg-white border p-6 rounded-lg shadow-sm flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold px-2 py-1 rounded bg-zinc-100 text-zinc-800 capitalize">
-                    {webinar.status}
-                  </span>
-                  <span className="text-xs text-zinc-500">
-                    {webinar.registrationCount ?? 0} Registrations
-                  </span>
-                </div>
-                <h2 className="text-lg font-bold text-zinc-900 mb-1">{webinar.title}</h2>
-                <p className="text-sm text-zinc-600 mb-4 line-clamp-2">{webinar.description || 'No description provided.'}</p>
-              </div>
-
-              <div className="border-t pt-4 mt-2 space-y-2 text-xs text-zinc-500">
-                <p>Starts: {new Date(webinar.startsAt).toLocaleString()}</p>
-                <div className="flex gap-2 pt-2">
-                  <a
-                    href={`/webinar/${webinar.slug || webinar.id}/register`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-zinc-900 font-medium underline"
-                  >
-                    Public Registration Link
-                  </a>
-                  <span>&bull;</span>
-                  <a
-                    href={`/webinar/${webinar.id}/join`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-zinc-900 font-medium underline"
-                  >
-                    Join Room
-                  </a>
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
       )}
     </div>
