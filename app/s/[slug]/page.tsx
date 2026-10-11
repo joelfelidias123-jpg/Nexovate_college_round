@@ -1,7 +1,7 @@
+import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
+import { connection } from 'next/server';
 import { getStore, type Site } from '@/lib/store';
-
-export const dynamic = 'force-dynamic';
 
 interface PublicSitePageProps {
   params: Promise<{
@@ -17,18 +17,23 @@ const escapeHtml = (value: string) =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 
-export default async function PublicSitePage({ params }: PublicSitePageProps) {
-  const { slug } = await params;
+async function PublicSiteContent({ params }: PublicSitePageProps) {
+  await connection();
+  const rawParams = await params;
+  const slug = decodeURIComponent(rawParams.slug).trim().toLowerCase();
 
+  console.log("DEBUG: looking up slug:", slug);
   let site: Site | undefined;
   try {
     const store = await getStore();
-    site = store.sites.find((item) => item.slug === slug);
+    console.log("DEBUG: existing sites in store:", store.sites.map((s) => ({ id: s.id, slug: s.slug, status: s.status })));
+    site = store.sites.find((item) => item.slug.toLowerCase() === slug);
   } catch (error) {
     console.error('Error fetching site from store:', error);
   }
 
   if (!site || site.status !== 'published') {
+    console.log("DEBUG: site not found or not published. Site:", site);
     notFound();
   }
 
@@ -52,5 +57,13 @@ export default async function PublicSitePage({ params }: PublicSitePageProps) {
       {css && <style dangerouslySetInnerHTML={{ __html: css }} />}
       <div dangerouslySetInnerHTML={{ __html: html }} />
     </main>
+  );
+}
+
+export default function PublicSitePage(props: PublicSitePageProps) {
+  return (
+    <Suspense fallback="Loading...">
+      <PublicSiteContent {...props} />
+    </Suspense>
   );
 }

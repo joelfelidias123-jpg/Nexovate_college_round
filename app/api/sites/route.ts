@@ -27,11 +27,12 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const siteId = searchParams.get("siteId");
-    const slug = searchParams.get("slug");
+    const rawSlug = searchParams.get("slug");
+    const slug = rawSlug ? decodeURIComponent(rawSlug).trim().toLowerCase() : null;
     const state = await getStore();
 
     if (siteId || slug) {
-      let site = state.sites.find((item) => (siteId && item.id === siteId) || (slug && item.slug === slug));
+      let site = state.sites.find((item) => (siteId && item.id === siteId) || (slug && item.slug.toLowerCase() === slug));
       if (!site && (siteId === "site_default" || slug === "welcome")) {
         const now = new Date();
         const starter: Site = {
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
           draft.sites.push(starter);
           return starter;
         });
-        site = seeded.sites.find((item) => (siteId && item.id === siteId) || (slug && item.slug === slug));
+        site = seeded.sites.find((item) => (siteId && item.id === siteId) || (slug && item.slug.toLowerCase() === slug));
       }
       if (!site) return Response.json({ success: false, error: "Site not found" }, { status: 404 });
       return Response.json({ success: true, site: asBuilderRecord(site) });
@@ -67,48 +68,75 @@ export async function POST(request: Request) {
     try { body = await request.json(); }
     catch { return Response.json({ success: false, error: "Invalid request body" }, { status: 400 }); }
 
-    // Preserve P2's existing visual-builder request and response shape, backed by
-    // the same persistent P4 store as the site list/editor API.
     if ("siteId" in body || "html" in body || "action" in body || "css" in body) {
-      const siteId = typeof body.siteId === "string" ? body.siteId : "site_default";
+      const targetId = (typeof body.siteId === "string" && body.siteId.trim() !== "") ? body.siteId.trim() : makeId("site");
       const html = body.html;
       const css = typeof body.css === "string" ? body.css : "";
       const action = body.action;
       const requestedSlug = body.slug;
+
       if (typeof html !== "string") return Response.json({ success: false, error: "HTML content required" }, { status: 400 });
       if (action === "publish" && (typeof requestedSlug !== "string" || !requestedSlug.trim())) {
         return Response.json({ success: false, error: "Slug is required for publishing" }, { status: 400 });
       }
 
-      const { state, result } = await updateStore((draft) => {
+      const cleanSlug = action === "publish"
+        ? decodeURIComponent(requestedSlug as string).trim().toLowerCase().replace(/[^a-z0-9-_]/g, "-")
+        : undefined;
+
+      console.log("DEBUG: saving/publishing siteId:", targetId, "slug:", cleanSlug);
+
+      const updateResult = await updateStore((draft) => {
         const now = new Date();
-        const cleanSlug = action === "publish"
-          ? (requestedSlug as string).trim().toLowerCase().replace(/[^a-z0-9-_]/g, "-")
-          : undefined;
-        if (cleanSlug && draft.sites.some((item) => item.slug === cleanSlug && item.id !== siteId)) {
+
+        if (cleanSlug && draft.sites.some((item) => item.slug.toLowerCase() === cleanSlug && item.id !== targetId)) {
           return { error: "Slug is already in use. Please pick another." };
         }
-        let site = draft.sites.find((item) => item.id === siteId);
+
+        let site = draft.sites.find((item) => item.id === targetId);
         if (!site) {
-          site = { id: siteId, slug: siteId === "site_default" ? "welcome" : siteId, title: "Builder site", status: "draft", templateId: "builder", content: {}, createdAt: now, updatedAt: now };
+          const fallbackSlug = cleanSlug || `site-${targetId.slice(-6)}`;
+          site = {
+            id: targetId,
+            slug: fallbackSlug,
+            title: "Builder site",
+            status: "draft",
+            templateId: "builder",
+            content: {},
+            createdAt: now,
+            updatedAt: now,
+          };
           draft.sites.push(site);
         }
+
         if (action === "publish") {
           site.slug = cleanSlug!;
           site.status = "published";
-          site.publishedAt ??= now;
+          site.publishedAt = site.publishedAt || now;
         }
+
         site.content = { ...site.content, html, css };
         site.updatedAt = now;
+
         return { site: asBuilderRecord(site), published: action === "publish" };
       });
-      if ("error" in result) return Response.json({ success: false, error: result.error }, { status: 409 });
-      const site = state.sites.find((item) => item.id === siteId)!;
+
+      const { state, result } = updateResult;
+
+      if ("error" in result) {
+        return Response.json({ success: false, error: result.error }, { status: 409 });
+      }
+
+      const savedSite = state.sites.find((item) => item.id === targetId);
+      if (!savedSite) {
+        return Response.json({ success: false, error: "Failed to persist site to database" }, { status: 500 });
+      }
+
       return Response.json({
         success: true,
         message: result.published ? "Site published successfully" : "Site saved successfully",
         site: result.site,
-        ...(result.published ? { url: `/s/${site.slug}` } : {}),
+        ...(result.published ? { url: `/s/${savedSite.slug}` } : {}),
       });
     }
 

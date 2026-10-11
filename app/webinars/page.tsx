@@ -31,26 +31,27 @@ export default function WebinarsPage() {
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
 
-  useEffect(() => {
-    let ignore = false;
-    async function load() {
-      try {
-        const res = await fetch('/api/webinars');
-        if (res.ok) {
-          const data = await res.json();
-          if (!ignore) {
-            setWebinars(data.webinars || []);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch webinars:', err);
-      } finally {
+  const loadWebinars = async (ignore = false) => {
+    try {
+      const res = await fetch('/api/webinars');
+      if (res.ok) {
+        const data = await res.json();
         if (!ignore) {
-          setLoading(false);
+          setWebinars(data.webinars || []);
         }
       }
+    } catch (err) {
+      console.error('Failed to fetch webinars:', err);
+    } finally {
+      if (!ignore) {
+        setLoading(false);
+      }
     }
-    load();
+  };
+
+  useEffect(() => {
+    let ignore = false;
+    loadWebinars(ignore);
     return () => {
       ignore = true;
     };
@@ -95,7 +96,7 @@ export default function WebinarsPage() {
         setStartTime('');
         setEndDate('');
         setEndTime('');
-        fetchWebinars();
+        loadWebinars();
       } else {
         setErrorMessage(data.error || 'Failed to create webinar');
       }
@@ -224,7 +225,7 @@ export default function WebinarsPage() {
                   <Button type="button" variant="outline" onClick={() => setIsOpen(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={isSubmitting}>
+                  <Button type="submit" isDisabled={isSubmitting}>
                     {isSubmitting ? 'Creating...' : 'Create'}
                   </Button>
                 </div>
