@@ -9,7 +9,8 @@
     "lint": "eslint",
     "db:seed": "node scripts/seed.mjs",
     "db:migrate": "node scripts/prisma.mjs migrate deploy",
-    "db:generate": "node scripts/prisma.mjs generate"
+    "db:generate": "node scripts/prisma.mjs generate",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -20,7 +21,6 @@
     "lucide-react": "^1.55.0",
     "next": "16.4.0",
     "nodemailer": "^10.1.0",
-    "prisma": "^6.19.3",
     "react": "19.3.0",
     "react-aria-components": "^1.22.1",
     "react-dom": "19.3.0",
@@ -36,6 +36,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
+    "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "typescript": "^5"
   },

@@ -11,11 +11,12 @@ export default function BuilderPage() {
   const [isPublishOpen, setIsPublishOpen] = useState(false);
   const [slug, setSlug] = useState('');
   const [publishStatus, setPublishStatus] = useState<{ url?: string; error?: string } | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
 
   const siteId = 'site_default';
 
   useEffect(() => {
-    // Load existing site on open
     fetch(`/api/sites?siteId=${siteId}`)
       .then(async (res) => {
         const data = await res.json().catch(() => ({ success: false, error: 'Invalid JSON response' }));
@@ -32,6 +33,7 @@ export default function BuilderPage() {
 
   const handleSave = () => {
     if (!editor) return;
+    setIsSaving(true);
     const html = editor.getHtml();
     const css = editor.getCss();
 
@@ -43,20 +45,22 @@ export default function BuilderPage() {
       .then(async (res) => {
         const data = await res.json().catch(() => ({ success: false, error: 'Invalid JSON response from server' }));
         if (res.ok && data.success) {
-          alert('Site saved as draft!');
+          alert('Draft saved successfully!');
         } else {
           alert('Failed to save: ' + (data.error || `Server error (${res.status})`));
         }
       })
       .catch((err) => {
         console.error('Error saving site:', err);
-        alert('An error occurred.');
-      });
+        alert('An error occurred while saving.');
+      })
+      .finally(() => setIsSaving(false));
   };
 
   const handlePublishSubmit = (_e: React.FormEvent) => {
     _e.preventDefault();
     if (!editor) return;
+    setIsPublishing(true);
     setPublishStatus(null);
 
     const html = editor.getHtml();
@@ -84,7 +88,8 @@ export default function BuilderPage() {
       .catch((err) => {
         console.error('Error publishing site:', err);
         setPublishStatus({ error: err.message || 'Network error publishing site.' });
-      });
+      })
+      .finally(() => setIsPublishing(false));
   };
 
   const loadSaaS = () => {
@@ -111,22 +116,28 @@ export default function BuilderPage() {
   };
 
   return (
-    <div className="flex flex-col h-screen">
-      <header className="flex items-center justify-between p-4 border-b bg-white">
-        <h1 className="text-xl font-bold">Nexus Website Builder</h1>
-        <div className="flex gap-2 items-center">
-          <Button variant="outline" onClick={loadSaaS}>
-            Load SaaS Template
+    <div className="flex flex-col h-screen font-sans">
+      <header className="flex items-center justify-between px-6 py-4 border-b bg-white shadow-xs">
+        <div>
+          <h1 className="text-lg font-bold text-[#20342d]">Nexus Builder</h1>
+          <p className="text-xs text-[#667085]">Visual website editor</p>
+        </div>
+        <div className="flex gap-3 items-center">
+          <Button variant="outline" onClick={loadSaaS} className="text-xs">
+            SaaS Template
           </Button>
-          <Button variant="outline" onClick={loadWebinar}>
-            Load Webinar Template
+          <Button variant="outline" onClick={loadWebinar} className="text-xs">
+            Webinar Template
           </Button>
-          {/* Save is Secondary button */}
-          <Button variant="outline" onClick={handleSave}>
-            Save
+          <Button variant="outline" onClick={handleSave} isDisabled={isSaving} className="text-xs">
+            {isSaving ? 'Saving...' : 'Save Draft'}
           </Button>
-          {/* Publish is Primary button */}
-          <Button variant="default" onClick={() => setIsPublishOpen(true)}>
+          {/* Exactly one primary button for Publish */}
+          <Button
+            variant="default"
+            onClick={() => setIsPublishOpen(true)}
+            className="bg-[#2d7659] hover:bg-[#174f3b] text-white text-xs font-bold"
+          >
             Publish
           </Button>
         </div>
@@ -134,49 +145,49 @@ export default function BuilderPage() {
 
       {/* Publish Dialog */}
       {isPublishOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-lg">
-            <h2 className="text-lg font-bold mb-2">Publish Your Site</h2>
-            <p className="text-sm text-zinc-600 mb-4">
-              Enter a unique URL slug for your landing page.
+        <div className="fixed inset-0 bg-[#20342d]/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl border border-[#e9eee9]">
+            <h2 className="text-xl font-extrabold text-[#20342d] mb-2">Publish Your Landing Page</h2>
+            <p className="text-sm text-[#667085] mb-6">
+              Choose a unique URL slug where your site will be live on the internet.
             </p>
-            <form onSubmit={handlePublishSubmit} className="flex flex-col gap-4">
+            <form onSubmit={handlePublishSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-zinc-700 mb-1">URL Slug</label>
-                <div className="flex items-center border rounded-md px-3 py-2 bg-zinc-50">
-                  <span className="text-sm text-zinc-500 mr-1">/s/</span>
+                <label className="block text-[11px] font-bold text-[#667085] uppercase tracking-wider mb-1.5">URL Slug</label>
+                <div className="flex items-center border border-[#e9eee9] bg-[#f6f8f5] rounded-xl px-4 py-2.5 focus-within:border-[#2d7659]">
+                  <span className="text-sm text-[#667085] mr-1">/s/</span>
                   <input
                     type="text"
                     required
                     value={slug}
                     onChange={(e) => setSlug(e.target.value)}
-                    placeholder="my-cool-site"
-                    className="flex-1 bg-transparent text-sm outline-none"
+                    placeholder="my-landing-page"
+                    className="flex-1 bg-transparent text-sm outline-none text-[#20342d] font-medium"
                   />
                 </div>
               </div>
 
               {publishStatus?.error && (
-                <div className="p-2 text-sm text-red-600 bg-red-50 rounded border border-red-200">
-                  {publishStatus.error}
+                <div className="p-3 text-xs text-red-600 bg-red-50 rounded-lg border border-red-100 font-medium">
+                  ⚠️ {publishStatus.error}
                 </div>
               )}
 
               {publishStatus?.url && (
-                <div className="p-3 text-sm text-emerald-700 bg-emerald-50 rounded border border-emerald-200">
-                  Site published! View at:{' '}
+                <div className="p-4 text-xs text-emerald-800 bg-[#eaf4ee] rounded-xl border border-[#2d7659]/20">
+                  <p className="font-bold mb-1">Successfully published!</p>
                   <a
                     href={publishStatus.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-bold underline ml-1"
+                    className="underline font-mono text-[#2d7659] break-all block mt-1"
                   >
-                    {publishStatus.url}
+                    {typeof window !== 'undefined' ? window.location.origin : ''}{publishStatus.url}
                   </a>
                 </div>
               )}
 
-              <div className="flex justify-end gap-2 mt-2">
+              <div className="flex justify-end gap-2 pt-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -187,14 +198,20 @@ export default function BuilderPage() {
                 >
                   Close
                 </Button>
-                <Button type="submit">Confirm & Publish</Button>
+                <Button
+                  type="submit"
+                  isDisabled={isPublishing}
+                  className="bg-[#2d7659] hover:bg-[#174f3b] text-white font-bold"
+                >
+                  {isPublishing ? 'Publishing...' : 'Confirm & Publish'}
+                </Button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      <div className="flex-1">
+      <div className="flex-1 bg-zinc-100">
         <GrapesEditor onSave={() => {}} onInit={(ed) => setEditor(ed)} />
       </div>
     </div>
