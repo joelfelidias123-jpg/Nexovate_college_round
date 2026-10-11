@@ -17,11 +17,11 @@ export default function BuilderPage() {
   useEffect(() => {
     // Load existing site on open
     fetch(`/api/sites?siteId=${siteId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && editor) {
-          editor.setComponents(data.site.html);
-          editor.setStyle(data.site.css);
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({ success: false, error: 'Invalid JSON response' }));
+        if (res.ok && data && data.success && data.site && editor) {
+          editor.setComponents(data.site.html || '');
+          editor.setStyle(data.site.css || '');
           if (data.site.slug) {
             setSlug(data.site.slug);
           }
@@ -40,12 +40,12 @@ export default function BuilderPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId, html, css, action: 'save' }),
     })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({ success: false, error: 'Invalid JSON response from server' }));
+        if (res.ok && data.success) {
           alert('Site saved as draft!');
         } else {
-          alert('Failed to save: ' + data.error);
+          alert('Failed to save: ' + (data.error || `Server error (${res.status})`));
         }
       })
       .catch((err) => {
@@ -54,8 +54,8 @@ export default function BuilderPage() {
       });
   };
 
-  const handlePublishSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePublishSubmit = (_e: React.FormEvent) => {
+    _e.preventDefault();
     if (!editor) return;
     setPublishStatus(null);
 
@@ -67,17 +67,23 @@ export default function BuilderPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId, html, css, action: 'publish', slug }),
     })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
+      .then(async (res) => {
+        let data;
+        try {
+          data = await res.json();
+        } catch {
+          throw new Error('Server returned non-JSON response: ' + res.statusText);
+        }
+
+        if (res.ok && data.success) {
           setPublishStatus({ url: data.url });
         } else {
-          setPublishStatus({ error: data.error });
+          setPublishStatus({ error: data.error || `Server error (${res.status})` });
         }
       })
       .catch((err) => {
         console.error('Error publishing site:', err);
-        setPublishStatus({ error: 'Network error publishing site.' });
+        setPublishStatus({ error: err.message || 'Network error publishing site.' });
       });
   };
 
